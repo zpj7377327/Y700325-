@@ -1,0 +1,672 @@
+#include <asm/page.h>
+#include <linux/err.h>
+#include <linux/mm.h>
+#include <linux/seq_file.h>
+#include <linux/sizes.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/proc_fs.h>
+#include <linux/spinlock.h>
+#include <linux/gfp.h>
+#include <linux/mm_types.h>
+#include <linux/slab.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/uaccess.h>
+#include <linux/sched.h>
+#include <linux/signal.h>
+#include <linux/sched/signal.h>
+#include <linux/cpufreq.h>
+#include <linux/healthinfo/fg.h>
+#include <linux/sched/rt.h>
+
+#include "ux_page_pool.h"
+#include "internal.h"
+
+#include <linux/sysctl.h>
+#if defined(OPLUS_FEATURE_SCHED_ASSIST) && defined(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+#include <linux/sched_assist/sched_assist_common.h>
+#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+
+#ifdef UXPAGEPOOL_DEBUG
+#include <linux/cred.h>
+#include <linux/debugfs.h>
+#include <linux/init.h>
+#include <linux/moduleparam.h>
+#include <linux/version.h>
+#endif
+
+#define UX_PAGE_POOL_NAME "ux_page_pool_fillthread"
+#define MAX_POOL_ALLOC_RETRIES (5)
+#define K(x) ((x) << (PAGE_SHIFT - 10))
+//static const unsigned int orders[] = {0, 4, 8};
+static const unsigned int orders[] = {0, 1};
+//32M for order 0, 8M  for order1 default
+static const unsigned int page_pool_nr_pages[] = {(SZ_32M >> PAGE_SHIFT), (SZ_8M >> PAGE_SHIFT)};
+#define NUM_ORDERS ARRAY_SIZE(orders)
+static struct ux_page_pool *pools[NUM_ORDERS];
+static struct task_struct *ux_page_pool_tsk = NULL;
+static struct proc_dir_entry *ux_page_pool_entry;
+static wait_queue_head_t kworkthread_waitq;
+static unsigned int kworkthread_wait_flag;
+static bool ux_page_pool_enabled = false;
+static bool fillthread_enabled = false;
+static bool free_to_pool = false;
+static bool ux_page_pool_initialized;
+static DEFINE_MUTEX(ux_page_pool_init_lock);
+
+static unsigned long ux_pool_alloc_fail = 0;
+
+#ifdef UXPAGEPOOL_DEBUG
+static atomic_long_t g_alloc_pages_fast[NUM_ORDERS]
+	[UX_POOL_MIGRATETYPE_TYPES_SIZE] = {{ATOMIC_LONG_INIT(0)}};
+static atomic_long_t g_alloc_pages_fast_retry[NUM_ORDERS]
+	[UX_POOL_MIGRATETYPE_TYPES_SIZE][MAX_POOL_ALLOC_RETRIES] = {{{ATOMIC_LONG_INIT(0)}}};
+static atomic_long_t g_alloc_pages_slow[NUM_ORDERS]
+	[UX_POOL_MIGRATETYPE_TYPES_SIZE] = {{ATOMIC_LONG_INIT(0)}};
+static atomic_long_t fillthread_runtime_times[NUM_ORDERS]
+	[UX_POOL_MIGRATETYPE_TYPES_SIZE] = {{ATOMIC_LONG_INIT(0)}};
+#endif
+#define PARA_BUF_LEN 512
+
+static int page_pool_fill(struct ux_page_pool *pool, int migratetype);
+
+static unsigned int ux_page_pool_capacity(unsigned int nr_pages,
+		unsigned int order)
+{
+	return (nr_pages / UX_POOL_MIGRATETYPE_TYPES_SIZE) >> order;
+}
+
+int ux_page_pool_enable = 1;
+
+bool get_critical_zeroslowpath_task_flag(struct task_struct *tsk)
+{
+	if (!tsk)
+		return false;
+
+	if ((tsk->ux_im_flag == IM_FLAG_SYSTEMSERVER_PID) ||
+		(tsk->ux_im_flag == IM_FLAG_SURFACEFLINGER))
+		return true;
+	else
+		return false;
+}
+
+bool is_critical_zeroslowpath_task(struct task_struct *tsk)
+{
+	if (!tsk)
+		return false;
+
+	if (unlikely(test_task_ux(tsk) || rt_task(tsk) || task_is_fg(tsk) ||
+			get_critical_zeroslowpath_task_flag(tsk)))
+		return true;
+	else
+		return false;
+}
+
+static int order_to_index(unsigned int order)
+{
+	int i;
+	for (i = 0; i < NUM_ORDERS; i++) {
+		if (order == orders[i])
+			return i;
+	}
+	return -1;
+}
+
+static void page_pool_wakeup_process(struct ux_page_pool *pool)
+{
+	if (unlikely(!READ_ONCE(ux_page_pool_enabled) ||
+			!READ_ONCE(ux_page_pool_enable)))
+		return;
+
+	if (NULL == pool) {
+		pr_err("%s: boost_pool is NULL!\n", __func__);
+		return;
+	}
+
+	if (READ_ONCE(fillthread_enabled)) {
+		WRITE_ONCE(kworkthread_wait_flag, 1);
+		wake_up_interruptible(&kworkthread_waitq);
+	}
+}
+
+void __maybe_unused set_ux_page_pool_fillthread_cpus(void)
+{
+	struct cpumask mask;
+	struct cpumask *cpumask = &mask;
+	cpumask_t policy_cpus;
+	pg_data_t *pgdat = NODE_DATA(0);
+	unsigned int cpu = 0, cpufreq_max_tmp = 0;
+	bool have_policy = false;
+
+	cpumask_clear(&policy_cpus);
+
+	for_each_possible_cpu(cpu) {
+		struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
+
+		if (policy == NULL)
+			continue;
+
+		if (policy->cpuinfo.max_freq >= cpufreq_max_tmp) {
+			cpufreq_max_tmp = policy->cpuinfo.max_freq;
+			cpumask_copy(&policy_cpus, policy->related_cpus);
+			have_policy = true;
+		}
+		cpufreq_cpu_put(policy);
+	}
+
+	cpumask_copy(cpumask, cpumask_of_node(pgdat->node_id));
+	if (have_policy)
+		cpumask_andnot(cpumask, cpumask, &policy_cpus);
+
+	if (!IS_ERR_OR_NULL(ux_page_pool_tsk) && !cpumask_empty(cpumask))
+		set_cpus_allowed_ptr(ux_page_pool_tsk, cpumask);
+}
+
+static int ux_page_pool_fillthread(void *p)
+{
+	struct ux_page_pool *pool;
+	int i, j;
+	int ret;
+#ifdef UXPAGEPOOL_DEBUG
+	unsigned long begin;
+	int record_i, record_j;
+#endif
+
+	if (unlikely(!READ_ONCE(ux_page_pool_enabled)))
+		return -1;
+	/* FIXME:temporarily skip to avoid stability issues.
+	set_ux_page_pool_fillthread_cpus();
+	*/
+	while (!kthread_should_stop()) {
+		ret = wait_event_interruptible(kworkthread_waitq,
+						       kthread_should_stop() ||
+						       READ_ONCE(kworkthread_wait_flag) == 1);
+		if (ret < 0)
+			continue;
+		if (kthread_should_stop())
+			break;
+
+		WRITE_ONCE(kworkthread_wait_flag, 0);
+		if (!READ_ONCE(ux_page_pool_enabled) ||
+			!READ_ONCE(ux_page_pool_enable))
+			continue;
+
+		for (i = 0; i < NUM_ORDERS; i++) {
+			pool = pools[i];
+			if (!pool)
+				continue;
+			for (j = 0; j < UX_POOL_MIGRATETYPE_TYPES_SIZE; j++) {
+#ifdef UXPAGEPOOL_DEBUG
+				if( pool->count[j] < pool->low[j]) {
+					record_i = i;
+					record_j = j;
+				}
+
+				begin = jiffies;
+				pr_info("fill start >>>>>order:%d migratetype:%d low: %d high: %d \
+					count:%d gfp_mask %#x.\n",
+					pool->order, j, pool->low[j], pool->high[j], pool->count[j], \
+					pool->gfp_mask);
+#endif
+				while (!kthread_should_stop() &&
+					READ_ONCE(ux_page_pool_enabled) &&
+					READ_ONCE(ux_page_pool_enable) &&
+					READ_ONCE(fillthread_enabled) &&
+					READ_ONCE(pool->count[j]) < READ_ONCE(pool->high[j])) {
+					if (page_pool_fill(pool, j) < 0)
+						msleep(20);
+				}
+#ifdef UXPAGEPOOL_DEBUG
+				pr_info("fill end   <<<<<order:%d migratetype:%d low: %d high: %d \
+					count:%d use %dms\n",
+					pool->order, j, pool->low[j], pool->high[j],pool->count[j],
+					jiffies_to_msecs(jiffies - begin));
+#endif
+			}
+		}
+
+#ifdef UXPAGEPOOL_DEBUG
+		atomic_long_inc(&fillthread_runtime_times[record_i][record_j]);
+#endif
+	}
+	return 0;
+}
+
+struct ux_page_pool *ux_page_pool_create(gfp_t gfp_mask, unsigned int order, unsigned int nr_pages)
+{
+	struct ux_page_pool *pool;
+	int i;
+
+	pool = kmalloc(sizeof(*pool), GFP_KERNEL);
+	if (!pool)
+		return ERR_PTR(-ENOMEM);
+
+	pool->gfp_mask = gfp_mask;
+	pool->order = order;
+	for (i = 0; i < UX_POOL_MIGRATETYPE_TYPES_SIZE; i++) {
+		pool->count[i] = 0;
+		/*MIGRATETYPE: UNMOVABLE & MOVABLE*/
+		pool->high[i] = ux_page_pool_capacity(nr_pages, order);
+		/* wakeup kthread on count < low, low = high/2*/
+		pool->low[i]  = pool->high[i]/2;
+		INIT_LIST_HEAD(&pool->items[i]);
+
+		pr_info("%s order:%d migratetype:%d low: %d high: %d count:%d.\n",
+			__func__, pool->order, i, pool->low[i], pool->high[i], pool->count[i]);
+	}
+
+	spin_lock_init(&pool->lock);
+	return pool;
+}
+
+static bool page_pool_add(struct ux_page_pool *pool, struct page *page, int migratetype)
+{
+	bool added = false;
+	unsigned long flags;
+	spin_lock_irqsave(&pool->lock, flags);
+	if (pool->count[migratetype] < pool->high[migratetype]) {
+		list_add_tail(&page->lru, &pool->items[migratetype]);
+		pool->count[migratetype]++;
+		added = true;
+	}
+	spin_unlock_irqrestore(&pool->lock, flags);
+	return added;
+}
+
+static struct page *page_pool_remove(struct ux_page_pool *pool, int migratetype)
+{
+	struct page *page;
+	int selected_migratetype = migratetype;
+	bool wakeup = false;
+	unsigned long flags;
+	spin_lock_irqsave(&pool->lock, flags);
+	page = list_first_entry_or_null(&pool->items[migratetype], struct page, lru);
+	if (!page) {
+		/* The pool label is bookkeeping; use the other supported list. */
+		selected_migratetype = migratetype == UX_POOL_MIGRATETYPE_UNMOVABLE ?
+			UX_POOL_MIGRATETYPE_MOVABLE : UX_POOL_MIGRATETYPE_UNMOVABLE;
+		page = list_first_entry_or_null(&pool->items[selected_migratetype],
+				struct page, lru);
+	}
+	if (page) {
+		pool->count[selected_migratetype]--;
+		list_del(&page->lru);
+		wakeup = pool->count[selected_migratetype] <
+			pool->low[selected_migratetype];
+	}
+	spin_unlock_irqrestore(&pool->lock, flags);
+
+	/* wakeup kthread on count < low*/
+	if (wakeup)
+		page_pool_wakeup_process(pool);
+
+	return page;
+}
+
+static int page_pool_fill(struct ux_page_pool *pool, int migratetype)
+{
+	struct page *page;
+	gfp_t gfp_refill;
+	unsigned long pfn;
+
+	if (!pool) {
+		pr_err("%s: pool is NULL!\n", __func__);
+		return -EINVAL;
+	}
+	gfp_refill = pool->gfp_mask;
+
+	page = alloc_pages(gfp_refill, pool->order);
+	if (NULL == page)
+		return -ENOMEM;
+	if (zone_idx(page_zone(page)) != ZONE_NORMAL ||
+		get_pageblock_migratetype(page) > MIGRATE_MOVABLE) {
+		__free_pages(page, pool->order);
+		return -EINVAL;
+	}
+	if (!put_page_testzero(page)) {
+		pr_err("%s: alloc_pages returned a referenced page\n", __func__);
+		return -EBUSY;
+	}
+	pfn = page_to_pfn(page);
+	if (!free_unref_page_prepare2(page, pool->order, pfn)) {
+		set_page_refcounted(page);
+		__free_pages(page, pool->order);
+		pr_err("KEN_pages free_unref_page_prepare2 fail\n");
+		return -EINVAL;
+	}
+
+	if (!page_pool_add(pool, page, migratetype)) {
+		set_page_refcounted(page);
+		__free_pages(page, pool->order);
+		return -EAGAIN;
+	}
+	return true;
+}
+
+/* fast path */
+struct page *ux_page_pool_alloc_pages(unsigned int order, int migratetype, bool may_retry)
+{
+	struct page *page = NULL;
+	int retries = 0;
+	struct ux_page_pool *pool = NULL;
+	int order_ind = order_to_index(order);
+
+	if (unlikely(!READ_ONCE(ux_page_pool_enabled) ||
+			READ_ONCE(ux_page_pool_enable) == 0) || (order_ind == -1) ||
+		(migratetype < 0) ||
+		(migratetype >= UX_POOL_MIGRATETYPE_TYPES_SIZE))
+		return NULL;
+
+	pool = pools[order_ind];
+	if (pool == NULL)
+		return NULL;
+
+	if (!(test_task_ux(current) || rt_task(current))) {
+		if (pool->count[migratetype] < pool->low[migratetype])
+			return NULL;
+	}
+
+retry:
+	/* Fast-path: Get a page from cache */
+	page = page_pool_remove(pool, migratetype);
+	if (!page && may_retry && retries < MAX_POOL_ALLOC_RETRIES) {
+		retries++;
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule_timeout(msecs_to_jiffies(2));
+		goto retry;
+	}
+
+#ifdef UXPAGEPOOL_DEBUG
+	if (page) {
+	    atomic_long_inc(&g_alloc_pages_fast[order][migratetype]);
+	} else {
+		atomic_long_inc(&g_alloc_pages_slow[order][migratetype]);
+	}
+
+	if(retries!=0)
+		atomic_long_inc(&g_alloc_pages_fast_retry[order][migratetype][retries - 1]);
+#endif
+	if (!page)
+		ux_pool_alloc_fail += 1;
+
+	return page;
+}
+
+int ux_page_pool_refill(struct page *page, unsigned int order, int migratetype)
+{
+	struct ux_page_pool *pool;
+	struct zone *zone;
+	unsigned long mark;
+	unsigned long free_pages;
+	int order_ind = order_to_index(order);
+
+	if (unlikely(READ_ONCE(ux_page_pool_enable) == 0 ||
+			!READ_ONCE(ux_page_pool_enabled) || !READ_ONCE(free_to_pool) ||
+			!page || order_ind == -1 || migratetype < 0 ||
+			migratetype > MIGRATE_MOVABLE))
+		return false;
+
+	zone = page_zone(page);
+	if (zone_idx(zone) != ZONE_NORMAL)
+		return false;
+
+	free_pages = zone_page_state(zone, NR_FREE_PAGES);
+	if (free_pages <= zone->nr_reserved_highatomic)
+		return false;
+	free_pages -= zone->nr_reserved_highatomic;
+	mark = zone->_watermark[WMARK_LOW];
+	if (free_pages <= mark)
+		return false;
+
+	pool = pools[order_ind];
+	if (pool == NULL)
+		return false;
+
+	return page_pool_add(pool, page, migratetype);
+}
+
+static ssize_t ux_page_pool_write(struct file *file,
+		const char __user *buff, size_t len, loff_t *ppos)
+{
+	char kbuf[PARA_BUF_LEN] = {'\0'};
+	char *str;
+	int high_0, high_1;
+	int i, ret;
+	struct ux_page_pool *pool;
+	unsigned long flags;
+
+	if (len > PARA_BUF_LEN - 1) {
+		pr_err("len %d is too long\n", len);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(&kbuf, buff, len))
+		return -EFAULT;
+	kbuf[len] = '\0';
+
+	str = strstrip(kbuf);
+	if (!str) {
+		pr_err("buff %s is invalid\n", kbuf);
+		return -EINVAL;
+	}
+
+	ret = sscanf(str, "%d %d", &high_0, &high_1);
+
+	if (ret == 2) {
+		if (high_0 < 0 || high_1 < 0)
+			return -EINVAL;
+
+		for (i = 0; i < UX_POOL_MIGRATETYPE_TYPES_SIZE; i++) {
+			pool = pools[0];
+			spin_lock_irqsave(&pool->lock, flags);
+			/* MIGRATETYPE: UNMOVABLE & MOVABLE */
+			pool->high[i] = ux_page_pool_capacity(high_0, pool->order);
+			pool->low[i]  = pool->high[i]/2;
+			spin_unlock_irqrestore(&pool->lock, flags);
+			pr_info("%s order:%d migratetype:%d low: %d high: %d count:%d.\n",
+				__func__, pool->order, i,
+				pool->low[i], pool->high[i], pool->count[i]);
+
+			pool = pools[1];
+			spin_lock_irqsave(&pool->lock, flags);
+			/* MIGRATETYPE: UNMOVABLE & MOVABLE */
+			pool->high[i] = ux_page_pool_capacity(high_1, pool->order);
+			pool->low[i]  = pool->high[i]/2;
+			spin_unlock_irqrestore(&pool->lock, flags);
+			pr_info("%s order:%d migratetype:%d low: %d high: %d count:%d.\n",
+				__func__, pool->order, i,
+				pool->low[i], pool->high[i], pool->count[i]);
+		}
+		return len;
+	}
+
+	if (strstr(str, "fillthread_pause")) {
+		WRITE_ONCE(fillthread_enabled, false);
+		return len;
+	}
+
+	if (strstr(str, "fillthread_resume")) {
+		WRITE_ONCE(fillthread_enabled, true);
+		page_pool_wakeup_process(pools[0]);
+		return len;
+	}
+
+	if (strstr(str, "free_to_pool=0")) {
+		WRITE_ONCE(free_to_pool, false);
+		return len;
+	}
+
+	if (strstr(str, "free_to_pool=1")) {
+		WRITE_ONCE(free_to_pool, true);
+		return len;
+	}
+
+	return -EINVAL;
+}
+
+static ssize_t ux_page_pool_read(struct file *file,
+		char __user *buffer, size_t count, loff_t *off)
+{
+	char kbuf[PARA_BUF_LEN] = {'\0'};
+	int len = 0;
+	int i, j;
+	struct ux_page_pool *pool;
+
+	for (i = 0; i < NUM_ORDERS; i++) {
+		pool = pools[i];
+		for (j = 0; j < UX_POOL_MIGRATETYPE_TYPES_SIZE; j++) {
+			len += snprintf(kbuf + len, PARA_BUF_LEN - len,
+					"order:%d migratetype:%d low: %d high: %d count:%d.\n",
+					pool->order, j,
+					pool->low[j], pool->high[j], pool->count[j]);
+		}
+	}
+
+	len += snprintf(kbuf + len, PARA_BUF_LEN - len,
+			"page_pool alloc fail count:%d\n", ux_pool_alloc_fail);
+	len += snprintf(kbuf + len, PARA_BUF_LEN - len,
+			"page_pool fillthread status:%s\n",
+			(READ_ONCE(ux_page_pool_enabled) && READ_ONCE(fillthread_enabled)) ?
+			"running" : "not running");
+	len += snprintf(kbuf + len, PARA_BUF_LEN - len,
+			"page_pool free_to_pool:%s\n",
+			READ_ONCE(free_to_pool) ? "enabled" : "disabled");
+
+	if (len == PARA_BUF_LEN)
+		kbuf[len - 1] = '\0';
+
+	if (len > *off)
+		len -= *off;
+	else
+		len = 0;
+
+	if (copy_to_user(buffer, kbuf + *off, (len < count ? len : count)))
+		return -EFAULT;
+
+	*off += (len < count ? len : count);
+	return (len < count ? len : count);
+}
+
+static const struct file_operations ux_page_pool_fops = {
+	.write = ux_page_pool_write,
+	.read = ux_page_pool_read,
+};
+
+
+static void ux_page_pool_free_structs(void)
+{
+	int i;
+
+	for (i = 0; i < NUM_ORDERS; i++) {
+		if (!IS_ERR_OR_NULL(pools[i]))
+			kfree(pools[i]);
+		pools[i] = NULL;
+	}
+}
+
+static int __ux_page_pool_init(void)
+{
+	int i;
+	int ret;
+
+	if (ux_page_pool_initialized) {
+		WRITE_ONCE(ux_page_pool_enabled, true);
+		page_pool_wakeup_process(pools[0]);
+		return 0;
+	}
+
+	if (!READ_ONCE(ux_page_pool_enable)) {
+		WRITE_ONCE(ux_page_pool_enabled, false);
+		return 0;
+	}
+
+	init_waitqueue_head(&kworkthread_waitq);
+	WRITE_ONCE(kworkthread_wait_flag, 0);
+	ux_page_pool_tsk = NULL;
+	for (i = 0; i < NUM_ORDERS; i++) {
+		pools[i] = ux_page_pool_create((GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN |
+			   __GFP_NORETRY) & ~__GFP_RECLAIM, orders[i], page_pool_nr_pages[i]);
+		if (IS_ERR_OR_NULL(pools[i])) {
+			ret = IS_ERR(pools[i]) ? PTR_ERR(pools[i]) : -ENOMEM;
+			pools[i] = NULL;
+			goto err_free_pools;
+		}
+	}
+
+	WRITE_ONCE(ux_page_pool_enabled, true);
+	WRITE_ONCE(fillthread_enabled, true);
+	ux_page_pool_tsk = kthread_run(ux_page_pool_fillthread, NULL, UX_PAGE_POOL_NAME);
+	if (IS_ERR_OR_NULL(ux_page_pool_tsk)) {
+		ret = IS_ERR(ux_page_pool_tsk) ? PTR_ERR(ux_page_pool_tsk) : -ENOMEM;
+		pr_err("%s:run ux_page_pool_fillthread failed: %d\n", __func__, ret);
+		ux_page_pool_tsk = NULL;
+		goto err_free_pools;
+	}
+
+	ux_page_pool_entry = proc_create("ux_page_pool", 0666, NULL,
+			&ux_page_pool_fops);
+	if (!ux_page_pool_entry) {
+		ret = -ENOMEM;
+		WRITE_ONCE(ux_page_pool_enabled, false);
+		WRITE_ONCE(fillthread_enabled, false);
+		WRITE_ONCE(kworkthread_wait_flag, 1);
+		wake_up_interruptible(&kworkthread_waitq);
+		kthread_stop(ux_page_pool_tsk);
+		ux_page_pool_tsk = NULL;
+		goto err_free_pools;
+	}
+
+	WRITE_ONCE(free_to_pool, true);
+	ux_page_pool_initialized = true;
+	page_pool_wakeup_process(pools[0]);
+	return 0;
+
+err_free_pools:
+	WRITE_ONCE(ux_page_pool_enabled, false);
+	WRITE_ONCE(fillthread_enabled, false);
+	WRITE_ONCE(free_to_pool, false);
+	if (ux_page_pool_entry) {
+		proc_remove(ux_page_pool_entry);
+		ux_page_pool_entry = NULL;
+	}
+	ux_page_pool_free_structs();
+	WRITE_ONCE(ux_page_pool_enable, 0);
+	return ret;
+}
+
+static int ux_page_pool_init(void)
+{
+	int ret;
+
+	mutex_lock(&ux_page_pool_init_lock);
+	ret = __ux_page_pool_init();
+	mutex_unlock(&ux_page_pool_init_lock);
+
+	return ret;
+}
+module_init(ux_page_pool_init);
+
+int ux_page_pool_enable_handler(struct ctl_table *table, int write,
+  	void __user *buffer, size_t *length, loff_t *ppos)
+{
+	int ret;
+
+	ret = proc_dointvec_minmax(table, write, buffer, length, ppos);
+	if (ret)
+		return ret;
+	if (write) {
+		if (READ_ONCE(ux_page_pool_enable)) {
+			ret = ux_page_pool_init();
+			if (ret)
+				WRITE_ONCE(ux_page_pool_enable, 0);
+		} else {
+			mutex_lock(&ux_page_pool_init_lock);
+			WRITE_ONCE(ux_page_pool_enabled, false);
+			WRITE_ONCE(kworkthread_wait_flag, 1);
+			wake_up_interruptible(&kworkthread_waitq);
+			mutex_unlock(&ux_page_pool_init_lock);
+		}
+	}
+	return ret;
+}

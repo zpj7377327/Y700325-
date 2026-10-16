@@ -26,6 +26,8 @@ Option Descriptions (Choose one of the three; options cannot be used simultaneou
   -b, --build    Skipped get toolchain and build kernel directly
   -p, --package  Pack AnyKernel3
   -a, --all      All steps have been completed
+  -k, --with-ksu   Build WITH KernelSU (default: pure build, KSU off)
+  -i, --incremental Keep out/ and only rebuild changed files (faster)
   -h, --help     Show this help message
 
 Example:
@@ -36,7 +38,7 @@ EOF
     exit 0
 }
 
-PARSED_ARGS=$(getopt -o gbpah --long get,build,package,all,help -n "$0" -- "$@")
+PARSED_ARGS=$(getopt -o gbpahki --long get,build,package,all,help,with-ksu,incremental -n "$0" -- "$@")
 if [ $? -ne 0 ]; then
     exit 1
 fi
@@ -61,6 +63,14 @@ while true; do
             ;;
         -a|--all)
             ACTION="all"
+            shift
+            ;;
+        -k|--with-ksu)
+            KSU=1
+            shift
+            ;;
+        -i|--incremental)
+            INC=1
             shift
             ;;
         -h|--help)
@@ -106,6 +116,12 @@ do_get() {
     fi
     info "All packages installed, Skip."
 
+    # 实际使用的工具链在 ../clang/bin (见 do_build 中 TOOLCHAIN_BIN), 存在则跳过全部下载
+    if [ -f "../clang/bin/clang" ] && [ -f "../clang/bin/aarch64-linux-gnu-ar" ]; then
+        info "Detect toolchain at ../clang/bin, Skip all downloads."
+        return 0
+    fi
+
     if [ -f "build_toolchain/clang_ZyC_23/bin/clang" ]; then
         info "Detect clang existed, Skip."
     else
@@ -150,8 +166,15 @@ do_build() {
         exit 1
     fi
 
+    # 增量编译: INC=1 时保留 out/, 只重编受影响的文件(秒级~分钟级)
+    # 默认清空重编(安全, 但耗时十几分钟)
     if [ -d "out" ]; then
-        rm -rf out
+        if [ "$INC" = "1" ]; then
+            info "=== 增量编译模式: 保留 out/ ==="
+        else
+            info "=== 全量编译模式: 清空 out/ ==="
+            rm -rf out
+        fi
     fi
 
     CROSS_FLAGS="CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-"
@@ -166,8 +189,14 @@ do_build() {
         # Unicode bypass fix
         ./scripts/config --file out/.config --enable CONFIG_UNICODE
 
-        # KernelSU 已关闭（纯净版构建）
-        ./scripts/config --file out/.config --disable CONFIG_KSU
+        # KernelSU 开关: 默认关闭(纯净版); 需要 KSU 版运行时前面加 KSU=1
+        if [ "$KSU" = "1" ]; then
+            info "=== KernelSU: 开启 ==="
+            ./scripts/config --file out/.config --enable CONFIG_KSU
+        else
+            info "=== KernelSU: 关闭（纯净版构建）==="
+            ./scripts/config --file out/.config --disable CONFIG_KSU
+        fi
 
         make ARCH=arm64 O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- $CROSS_FLAGS -j$(nproc --all)
     elif [ "$BUILD_DEVICE_NAME" == "fx2series" ]; then
@@ -178,8 +207,14 @@ do_build() {
         # Unicode bypass fix
         ./scripts/config --file out/.config --enable CONFIG_UNICODE
 
-        # KernelSU 已关闭（纯净版构建）
-        ./scripts/config --file out/.config --disable CONFIG_KSU
+        # KernelSU 开关: 默认关闭(纯净版); 需要 KSU 版运行时前面加 KSU=1
+        if [ "$KSU" = "1" ]; then
+            info "=== KernelSU: 开启 ==="
+            ./scripts/config --file out/.config --enable CONFIG_KSU
+        else
+            info "=== KernelSU: 关闭（纯净版构建）==="
+            ./scripts/config --file out/.config --disable CONFIG_KSU
+        fi
 
         make ARCH=arm64 O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- $CROSS_FLAGS -j$(nproc --all)
     else
@@ -190,8 +225,14 @@ do_build() {
         # Unicode bypass fix
         ./scripts/config --file out/.config --enable CONFIG_UNICODE
 
-        # KernelSU 已关闭（纯净版构建）
-        ./scripts/config --file out/.config --disable CONFIG_KSU
+        # KernelSU 开关: 默认关闭(纯净版); 需要 KSU 版运行时前面加 KSU=1
+        if [ "$KSU" = "1" ]; then
+            info "=== KernelSU: 开启 ==="
+            ./scripts/config --file out/.config --enable CONFIG_KSU
+        else
+            info "=== KernelSU: 关闭（纯净版构建）==="
+            ./scripts/config --file out/.config --disable CONFIG_KSU
+        fi
 
         make ARCH=arm64 O=out CC=clang BRAND_SHOW_FLAG=oneplus LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- $CROSS_FLAGS -j$(nproc --all)
     fi
@@ -199,11 +240,13 @@ do_build() {
 
 do_package() {
     info "=== Execution Mode: AnyKernel3 ==="
+    # 单跑 -p 时 do_build 不执行, 这里兜底设置设备名, 保证包名带前缀
+    BUILD_DEVICE="${BUILD_DEVICE:-oppo}"
     if [ -f "out/arch/arm64/boot/Image" ] && [ -f "out/arch/arm64/boot/dtbo.img" ] && [ -f "out/arch/arm64/boot/dtb" ]; then
         BUILD_TIMESTAMP=$(date +%s)
 
-        if [ -d "Anykernel3" ]; then
-            info "Detect Anykernel3, Skip."
+        if [ -d "AnyKernel3" ]; then
+            info "Detect AnyKernel3, Skip."
 
             if [ -f "AnyKernel3/Image" ] || [ -f "AnyKernel3/dtbo.img" ] || [ -f "AnyKernel3/dtb" ]; then
                 rm -f AnyKernel3/Image
@@ -222,12 +265,12 @@ do_package() {
         cp -fp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
         cp -fp out/arch/arm64/boot/dtb AnyKernel3/dtb
 
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' Anykernel3/anykernel.sh
-        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' Anykernel3/anykernel.sh
-        sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' Anykernel3/anykernel.sh
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
+        sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
 
         7za a -mx9 ${BUILD_DEVICE}_kona_${BUILD_TIMESTAMP}.zip AnyKernel3/*
-        info "Packed Anykernel3, filename: ${BUILD_DEVICE}_kona_${BUILD_TIMESTAMP}.zip"
+        info "Packed AnyKernel3, filename: ${BUILD_DEVICE}_kona_${BUILD_TIMESTAMP}.zip"
     else
         error "Could not found Image, dtbo.img and dtb. Please build kernel."
         exit 1

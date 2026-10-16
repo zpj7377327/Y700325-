@@ -159,3 +159,12 @@ boot_pack_clean/
 .clang-format
 .cocciconfig
 .mailmap
+
+# ===== 不纳入版本库 (2026-10-17) =====
+AnyKernel3/
+build_toolchain/
+*.zip
+*.idsig
+clang_ZyC_23/
+build_toolchain/
+*.bak.*

@@ -24,7 +24,7 @@ Usage: $0 [Option]
 Option Descriptions (Choose one of the three; options cannot be used simultaneously):
   -g, --get      Get Toolchain
   -b, --build    Skipped get toolchain and build kernel directly
-  -p, --package  Pack AnyKernel3
+  -p, --package  Pack boot.img (make_boot.sh, magiskboot)
   -a, --all      All steps have been completed
   -i, --incremental Keep out/ and only rebuild changed files (faster)
   -h, --help     Show this help message
@@ -210,40 +210,14 @@ do_build() {
 }
 
 do_package() {
-    info "=== Execution Mode: AnyKernel3 ==="
-    # 单跑 -p 时 do_build 不执行, 这里兜底设置设备名, 保证包名带前缀
-    BUILD_DEVICE="${BUILD_DEVICE:-oppo}"
-    if [ -f "out/arch/arm64/boot/Image" ] && [ -f "out/arch/arm64/boot/dtbo.img" ] && [ -f "out/arch/arm64/boot/dtb" ]; then
-        BUILD_TIMESTAMP=$(date +%s)
-
-        if [ -d "AnyKernel3" ]; then
-            info "Detect AnyKernel3, Skip."
-
-            if [ -f "AnyKernel3/Image" ] || [ -f "AnyKernel3/dtbo.img" ] || [ -f "AnyKernel3/dtb" ]; then
-                rm -f AnyKernel3/Image
-                rm -f AnyKernel3/dtbo.img
-                rm -f AnyKernel3/dtb
-                info "Cleared older Image files."
-            fi
-        else
-            git clone https://github.com/osm0sis/AnyKernel3.git -b master
-            cd AnyKernel3
-            git checkout dca9dc370838d919d56c1f59ec78b27a14a72c68
-            cd ..
-        fi
-
-        cp -fp out/arch/arm64/boot/Image AnyKernel3/Image
-        cp -fp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
-        cp -fp out/arch/arm64/boot/dtb AnyKernel3/dtb
-
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
-        sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
-
-        7za a -mx9 ${BUILD_DEVICE}_kona_${BUILD_TIMESTAMP}.zip AnyKernel3/*
-        info "Packed AnyKernel3, filename: ${BUILD_DEVICE}_kona_${BUILD_TIMESTAMP}.zip"
+    info "=== Execution Mode: make_boot.sh (magiskboot) ==="
+    IMG="out/arch/arm64/boot/Image"
+    if [ -f "$IMG" ]; then
+        chmod +x make_boot.sh
+        ./make_boot.sh "$IMG" "" "${BUILD_DEVICE:-oppo}_kona_$(date +%s).img"
+        info "Packed boot.img"
     else
-        error "Could not found Image, dtbo.img and dtb. Please build kernel."
+        error "Could not found $IMG. Please build kernel."
         exit 1
     fi
 }

@@ -161,7 +161,6 @@ boot_pack_clean/
 .mailmap
 
 # ===== 不纳入版本库 (2026-10-17) =====
-AnyKernel3/
 build_toolchain/
 *.zip
 *.idsig

@@ -167,3 +167,4 @@ build_toolchain/
 clang_ZyC_23/
 build_toolchain/
 *.bak.*
+cache/

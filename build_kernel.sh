@@ -26,7 +26,6 @@ Option Descriptions (Choose one of the three; options cannot be used simultaneou
   -b, --build    Skipped get toolchain and build kernel directly
   -p, --package  Pack AnyKernel3
   -a, --all      All steps have been completed
-  -k, --with-ksu   Build WITH KernelSU (default: pure build, KSU off)
   -i, --incremental Keep out/ and only rebuild changed files (faster)
   -h, --help     Show this help message
 
@@ -38,7 +37,7 @@ EOF
     exit 0
 }
 
-PARSED_ARGS=$(getopt -o gbpahki --long get,build,package,all,help,with-ksu,incremental -n "$0" -- "$@")
+PARSED_ARGS=$(getopt -o gbphi --long get,build,package,all,help,incremental -n "$0" -- "$@")
 if [ $? -ne 0 ]; then
     exit 1
 fi
@@ -63,10 +62,6 @@ while true; do
             ;;
         -a|--all)
             ACTION="all"
-            shift
-            ;;
-        -k|--with-ksu)
-            KSU=1
             shift
             ;;
         -i|--incremental)
@@ -189,14 +184,6 @@ do_build() {
         # Unicode bypass fix
         ./scripts/config --file out/.config --enable CONFIG_UNICODE
 
-        # KernelSU 开关: 默认关闭(纯净版); 需要 KSU 版运行时前面加 KSU=1
-        if [ "$KSU" = "1" ]; then
-            info "=== KernelSU: 开启 ==="
-            ./scripts/config --file out/.config --enable CONFIG_KSU
-        else
-            info "=== KernelSU: 关闭（纯净版构建）==="
-            ./scripts/config --file out/.config --disable CONFIG_KSU
-        fi
 
         make ARCH=arm64 O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- $CROSS_FLAGS -j$(nproc --all)
     elif [ "$BUILD_DEVICE_NAME" == "fx2series" ]; then
@@ -207,14 +194,6 @@ do_build() {
         # Unicode bypass fix
         ./scripts/config --file out/.config --enable CONFIG_UNICODE
 
-        # KernelSU 开关: 默认关闭(纯净版); 需要 KSU 版运行时前面加 KSU=1
-        if [ "$KSU" = "1" ]; then
-            info "=== KernelSU: 开启 ==="
-            ./scripts/config --file out/.config --enable CONFIG_KSU
-        else
-            info "=== KernelSU: 关闭（纯净版构建）==="
-            ./scripts/config --file out/.config --disable CONFIG_KSU
-        fi
 
         make ARCH=arm64 O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- $CROSS_FLAGS -j$(nproc --all)
     else
@@ -225,14 +204,6 @@ do_build() {
         # Unicode bypass fix
         ./scripts/config --file out/.config --enable CONFIG_UNICODE
 
-        # KernelSU 开关: 默认关闭(纯净版); 需要 KSU 版运行时前面加 KSU=1
-        if [ "$KSU" = "1" ]; then
-            info "=== KernelSU: 开启 ==="
-            ./scripts/config --file out/.config --enable CONFIG_KSU
-        else
-            info "=== KernelSU: 关闭（纯净版构建）==="
-            ./scripts/config --file out/.config --disable CONFIG_KSU
-        fi
 
         make ARCH=arm64 O=out CC=clang BRAND_SHOW_FLAG=oneplus LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- $CROSS_FLAGS -j$(nproc --all)
     fi

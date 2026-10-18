@@ -24,6 +24,11 @@
 #include <linux/netfilter_ipv6.h>
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
+#include <linux/ip.h>
+#include <linux/ipv6.h>
+#include <linux/if_ether.h>
+#include <net/neighbour.h>
+#include <net/ip.h>
 
 static int s_debug = 0;
 static int s_enable = 1;

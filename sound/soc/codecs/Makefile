@@ -515,3 +515,8 @@ obj-$(CONFIG_SND_SOC_MAX9877)	+= snd-soc-max9877.o
 obj-$(CONFIG_SND_SOC_MAX98504)	+= snd-soc-max98504.o
 obj-$(CONFIG_SND_SOC_SIMPLE_AMPLIFIER)	+= snd-soc-simple-amplifier.o
 obj-$(CONFIG_SND_SOC_TPA6130A2)	+= snd-soc-tpa6130a2.o
+
+# Lenovo Y700
+snd-soc-es7210-objs := es7210_adc.o
+obj-$(CONFIG_SND_SOC_ES7210)	+= snd-soc-es7210.o
+obj-$(CONFIG_SND_SOC_AS33970)	+= as33970/

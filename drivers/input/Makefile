@@ -39,3 +39,4 @@ obj-$(CONFIG_OPLUS_SECURE)  += oplus_secure_drivers/
 #endif /* OPLUS_FEATURE_FINGERPRINT */
 endif
 #endif
+obj-$(CONFIG_SENSORS_HALL)	+= hall_sensor.o

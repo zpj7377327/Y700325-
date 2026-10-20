@@ -1312,3 +1312,11 @@ config SND_SOC_TPA6130A2
 	depends on I2C
 
 endmenu
+source sound/soc/codecs/dbmdx/Kconfig
+
+config SND_SOC_AS33970
+       tristate "SYNA AS33970 CODEC"
+
+config SND_SOC_ES7210
+       tristate "Everest Semi ES7210 ADC"
+       default n

@@ -1061,6 +1061,11 @@ KBUILD_CFLAGS   += $(call cc-option,-Werror=date-time)
 # enforce correct pointer usage
 KBUILD_CFLAGS   += $(call cc-option,-Werror=incompatible-pointer-types)
 
+# ---- clang-23 兜底: 4.19 老内核按 clang10 写就, 新编译器把下列"废弃类"警告升级成错误,
+#      这里降级回警告, 避免逐个打地鼠(对 clang10 构建无副作用) ----
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=strict-prototypes)
+KBUILD_CFLAGS   += $(call cc-option,-Wno-error=date-time)
+
 # Require designated initializers for all marked structures
 KBUILD_CFLAGS   += $(call cc-option,-Werror=designated-init)
 

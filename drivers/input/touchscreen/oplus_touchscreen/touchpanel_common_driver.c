@@ -25,6 +25,14 @@
 #define GESTURE_MODE 1
 #define SLEEP_MODE   2
 
+/* Default pencil protocol type when nothing else decides it:
+ * 1 = TYPE_PENCIL_HAVON (1st gen pencil), 2 = TYPE_PENCIL_MAXEYE (2nd gen).
+ * The vendor DT "touchpanel,pen-id-map" on this panel maps every known
+ * pencil id to type 2, so 2 is the sane default. Overridable via Kconfig. */
+#ifndef CONFIG_TOUCHPANEL_PENCIL_TYPE_DEFAULT
+#define CONFIG_TOUCHPANEL_PENCIL_TYPE_DEFAULT TYPE_PENCIL_MAXEYE
+#endif
+
 #ifdef CONFIG_TOUCHIRQ_UPDATE_QOS
 #include <linux/pm_qos.h>
 #endif
@@ -3964,6 +3972,89 @@ static const struct file_operations proc_optimized_time_fops = {
 	.owner = THIS_MODULE,
 };
 
+/*
+ * Translate a raw pencil-type value into the actual protocol type to use,
+ * honoring the runtime A/B channel switch (ts->pen_config.pencil_type_mode):
+ *   0 (auto)   -> DT-derived default, fallback HAVON
+ *   1 (HAVON)  -> channel A
+ *   2 (MAXEYE) -> channel B (default)
+ * value == 0 means disconnect/unknown and yields no protocol type.
+ */
+uint8_t tp_translate_pencil_type(struct touchpanel_data *ts, uint8_t value)
+{
+	if (!ts)
+		return TYPE_PENCIL_HAVON;
+	if (value == 0)
+		return 0;
+	switch (ts->pen_config.pencil_type_mode) {
+	case PEN_CHANNEL_HAVON:
+		return TYPE_PENCIL_HAVON;
+	case PEN_CHANNEL_MAXEYE:
+		return TYPE_PENCIL_MAXEYE;
+	default: /* PEN_CHANNEL_AUTO */
+		if (ts->pen_config.pencil_type_default)
+			return ts->pen_config.pencil_type_default;
+		return TYPE_PENCIL_HAVON;
+	}
+}
+
+static ssize_t proc_pen_channel_read(struct file *file, char __user *user_buf, size_t count, loff_t *ppos)
+{
+	int ret = 0;
+	char page[PAGESIZE] = {0};
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if (!ts) {
+		snprintf(page, PAGESIZE - 1, "%d\n", -1);
+	} else {
+		snprintf(page, PAGESIZE - 1, "%u\n", ts->pen_config.pencil_type_mode);
+	}
+	ret = simple_read_from_buffer(user_buf, count, ppos, page, strlen(page));
+	return ret;
+}
+
+static ssize_t proc_pen_channel_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
+{
+	int value = 0;
+	char buf[5] = {0};
+	struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+	if ((count > 5) || !ts) {
+		TPD_INFO("%s error:count:%d.\n", __func__, (int)count);
+		return count;
+	}
+	if (copy_from_user(buf, buffer, count)) {
+		TPD_INFO("%s: read proc input error.\n", __func__);
+		return count;
+	}
+	sscanf(buf, "%d", &value);
+	if (value < PEN_CHANNEL_AUTO || value > PEN_CHANNEL_MAXEYE)
+		value = PEN_CHANNEL_MAXEYE;
+
+	mutex_lock(&ts->mutex);
+	ts->pen_config.pencil_type_mode = (uint8_t)value;
+	TPD_INFO("%s: pen channel set to %d (auto=0 havon/chA=1 maxeye/chB=2)\n",
+		 __func__, value);
+
+	/* If the pen is already connected, re-apply the new channel live. */
+	if (ts->is_pen_connected && ts->ts_ops->notify_pencil_type) {
+		ts->ts_ops->notify_pencil_type(ts->chip_data,
+					       tp_translate_pencil_type(ts, 1));
+		if (!ts->is_suspended &&
+		    (ts->suspend_state == TP_SPEEDUP_RESUME_COMPLETE))
+			ts->ts_ops->mode_switch(ts->chip_data, MODE_PEN_SCAN, true);
+	}
+	mutex_unlock(&ts->mutex);
+	return count;
+}
+
+static const struct file_operations proc_pen_channel_fops = {
+	.write = proc_pen_channel_write,
+	.read  = proc_pen_channel_read,
+	.open  = simple_open,
+	.owner = THIS_MODULE,
+};
+
 static ssize_t proc_pencil_connect_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
 {
 	int value = 0;
@@ -3986,7 +4077,8 @@ static ssize_t proc_pencil_connect_write(struct file *file, const char __user *b
 		ts->is_pen_connected = !!value;
 		TPD_INFO("%s: check pen state1 : %d-%d %d, is_suspended: %d\n", __func__, value, ts->is_pen_connected, ts->is_pen_attracted, ts->is_suspended);
 		if (ts->is_pen_connected && ts->ts_ops->notify_pencil_type) {
-			ts->ts_ops->notify_pencil_type(ts->chip_data, value);
+			ts->ts_ops->notify_pencil_type(ts->chip_data,
+						       tp_translate_pencil_type(ts, value));
         }
 		if (!ts->is_suspended && (ts->suspend_state == TP_SPEEDUP_RESUME_COMPLETE)) {	/* For close pencil scan under screen on mode */
 			ts->ts_ops->mode_switch(ts->chip_data, MODE_PEN_SCAN, ts->is_pen_connected);
@@ -4898,6 +4990,11 @@ static int init_touchpanel_proc(struct touchpanel_data *ts)
 
 	if (ts->pen_support) {
 		prEntry_tmp = proc_create_data("pencil_connected", 0666, prEntry_tp, &proc_pencil_connect_fops, ts);
+		if (prEntry_tmp == NULL) {
+			ret = -ENOMEM;
+			TPD_INFO("%s: Couldn't create proc entry, %d\n", __func__, __LINE__);
+		}
+		prEntry_tmp = proc_create_data("pen_channel", 0666, prEntry_tp, &proc_pen_channel_fops, ts);
 		if (prEntry_tmp == NULL) {
 			ret = -ENOMEM;
 			TPD_INFO("%s: Couldn't create proc entry, %d\n", __func__, __LINE__);
@@ -6697,6 +6794,39 @@ static int init_parse_dts(struct device *dev, struct touchpanel_data *ts)
 			ts->pen_config.tilt_y_max = temp_array[1];
 		}
 		TPD_INFO("pen_tilt_x = %d, pen_tilt_y = %d \n", ts->pen_config.tilt_x_max, ts->pen_config.tilt_y_max);
+
+		/* Parse touchpanel,pen-id-map: array of {pencil_id, pencil_type}
+		 * pairs. The vendor DT on this platform maps every pen id to type
+		 * 2 (MAXEYE); the original driver never read this property, so the
+		 * pen protocol type was stuck at the hard-coded HAVON default. Parse
+		 * it now so the correct type can be derived automatically. */
+		rc = of_property_count_u32_elems(np, "touchpanel,pen-id-map");
+		if (rc > 0 && (rc % 2 == 0)) {
+			int pairs = min_t(int, rc / 2, 8);
+
+			ts->pen_config.pen_id_map_num = pairs;
+			for (i = 0; i < pairs; i++) {
+				of_property_read_u32_index(np, "touchpanel,pen-id-map",
+							   i * 2,
+							   &ts->pen_config.pen_id_map[i][0]);
+				of_property_read_u32_index(np, "touchpanel,pen-id-map",
+							   i * 2 + 1,
+							   &ts->pen_config.pen_id_map[i][1]);
+				if (ts->pen_config.pen_id_map[i][1])
+					ts->pen_config.pencil_type_default =
+						(uint8_t)ts->pen_config.pen_id_map[i][1];
+			}
+			TPD_INFO("pen-id-map: %d pairs, default type=%d\n",
+				 ts->pen_config.pen_id_map_num,
+				 ts->pen_config.pencil_type_default);
+		} else {
+			TPD_INFO("touchpanel,pen-id-map not found, keep HAVON default\n");
+		}
+
+		/* Default the runtime A/B switch to channel B (MAXEYE) so the
+		 * 2nd-gen pen works out of the box; switchable at runtime via
+		 * /proc/touchpanel/pen_channel. */
+		ts->pen_config.pencil_type_mode = PEN_CHANNEL_MAXEYE;
 	}
 
 	rc = of_property_read_u32_array(np, "earsense,tx-rx-num", tx_rx_num, 2);

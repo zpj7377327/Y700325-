@@ -303,7 +303,17 @@ struct pen_config {
 	uint32_t	max_pressure;
 	int		tilt_x_max;
 	int		tilt_y_max;
+	/* "touchpanel,pen-id-map" from vendor DT: {pencil_id, pencil_type} pairs */
+	uint32_t	pen_id_map[8][2];
+	uint8_t		pen_id_map_num;
+	/* pencil protocol type used when nothing else decides (DT-derived) */
+	uint8_t		pencil_type_default;
+	/* runtime A/B switch: 0 = auto, 1 = force HAVON, 2 = force MAXEYE */
+	uint8_t		pencil_type_mode;
 };
+
+struct touchpanel_data;
+uint8_t tp_translate_pencil_type(struct touchpanel_data *ts, uint8_t value);
 
 struct gesture_info {
 	uint32_t gesture_type;
@@ -493,6 +503,13 @@ typedef enum {
 	TYPE_PENCIL_HAVON = 1,
 	TYPE_PENCIL_MAXEYE = 2,
 } pencil_type;
+
+/* Pen protocol channel selector (runtime A/B switch, exposed via
+ * /proc/touchpanel/pen_channel). Channel A = HAVON (1st-gen pen),
+ * Channel B = MAXEYE (2nd-gen pen). Default is channel B. */
+#define PEN_CHANNEL_AUTO   0   /* use DT-derived default type */
+#define PEN_CHANNEL_HAVON  1   /* channel A: HAVON */
+#define PEN_CHANNEL_MAXEYE 2   /* channel B: MAXEYE (default) */
 
 struct point_state_monitor {
 	u64 time_counter;

@@ -2605,6 +2605,13 @@ static void nvt_notify_pencil_type(void *chip_data, uint8_t value)
 		return;
 	}
 
+	/* Clamp to a supported protocol type. Anything unexpected (e.g. a raw
+	 * pencil id of 3/4/5 that the old code rejected with
+	 * "pencil type not defined") falls back to MAXEYE (2nd-gen pen) instead
+	 * of leaving pen mode broken and silent. */
+	if (value != TYPE_PENCIL_HAVON && value != TYPE_PENCIL_MAXEYE)
+		value = TYPE_PENCIL_MAXEYE;
+
 	chip_info->current_pencil_type = value;
 	TPD_INFO("set pencil type to %d.\n", chip_info->current_pencil_type);
 
@@ -2621,7 +2628,12 @@ static int nvt_enable_pen_mode(struct chip_data_nt36523 *chip_info, bool enable)
 		} else if (TYPE_PENCIL_MAXEYE == chip_info->current_pencil_type) {
 			ret = nvt_extend_cmd_store(chip_info, EVENTBUFFER_EXT_CMD, EVENTBUFFER_EXT_PEN_MODE_2ND_ON);
 		} else {
-			TPD_INFO("error for pencil type not defined!!!\n");
+			/* Defensive fallback: never leave pen mode disabled on an
+			 * unknown type. Force MAXEYE and issue the command. */
+			chip_info->current_pencil_type = TYPE_PENCIL_MAXEYE;
+			ret = nvt_extend_cmd_store(chip_info, EVENTBUFFER_EXT_CMD,
+						   EVENTBUFFER_EXT_PEN_MODE_2ND_ON);
+			TPD_INFO("pencil type undefined, fallback to MAXEYE.\n");
 		}
 	} else {
 		ret = nvt_extend_cmd_store(chip_info, EVENTBUFFER_EXT_CMD, EVENTBUFFER_EXT_PEN_MODE_OFF);
@@ -6881,7 +6893,10 @@ static int nvt_tp_probe(struct spi_device *client)
 	}
 
 	chip_info->probe_done = 1;
-	chip_info->current_pencil_type = TYPE_PENCIL_HAVON;
+	/* Boot default to MAXEYE (channel B) so the 2nd-gen pen works out of the
+	 * box. The runtime A/B switch in the common driver may override this on
+	 * connect. */
+	chip_info->current_pencil_type = TYPE_PENCIL_MAXEYE;
 	TPD_INFO("%s, probe normal end\n", __func__);
 	return 0;
 

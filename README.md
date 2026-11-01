@@ -1,47 +1,65 @@
-# OPPO OPD2101 (SM8250) 内核
+# 联想拯救者 Y700 (TB-9707F / J716F) 内核
 
-OPPO OPD2101 平板 (骁龙 870 / kona) 自编译内核, 基于 ColorOS 16 内核源码, 含性能调优与内存扩展支持。**纯净版, 不含 KernelSU。**
+本项目是为联想拯救者 Y700 平板（第一代，骁龙 870 / `kona`）定制移植的 Linux 内核工程（基于 Linux 4.19.325 LTS），主要用于驱动与适配 ColorOS 16 / 高版本 Android 系统，包含硬件驱动移植、性能调优与 KernelSU 支持。
 
-## 一键编译
+---
+
+## 硬件与特性支持
+
+- **设备型号**：Lenovo Legion Y700 (TB-9707F / J716F)
+- **SoC**：Qualcomm Snapdragon 870 (`kona` / `sm8250`)
+- **内核基座**：Linux Kernel 4.19.325
+- **触控芯片**：Goodix GT738x (`drivers/input/touchscreen/goodix/`)，支持 Y700 原生触控面板及触控手势
+- **手写笔**：联想二代灵感手写笔驱动与通道切换支持
+- **外设与传感器**：
+  - Type-C USB Redriver (`pi2dpx1217`)
+  - 霍尔传感器 (`hall_sensor`)
+  - 音频 Codec（`es7210_adc`、`as33970`）
+  - EROFS / F2FS 文件系统完整支持
+- **Root 方案**：内置 KernelSU (0.9.5，版本号 pin 至 11071)
+
+---
+
+## 源码树主要结构
+
+| 目录 / 文件 | 说明 |
+|---|---|
+| `arch/arm64/configs/vendor/j716f_defconfig` | Y700 官方及移植特性核心 defconfig |
+| `drivers/input/touchscreen/goodix/` | Y700 GT738x 触摸驱动源码 |
+| `drivers/input/touchscreen/nt36xxx/` | 备用 / 补充触摸固件支持 |
+| `drivers/usb/misc/pi2dpx1217.c` | Type-C 高速信号重驱动 |
+| `drivers/kernelsu/` | 内嵌 KernelSU 源码与钩子 |
+
+---
+
+## 编译指南
+
+使用匹配的 Clang 工具链（如 ZyC Clang / AOSP Clang 10+）：
 
 ```bash
-./build_kernel.sh --all        # 全流程: 检查工具链 -> 编译 -> 打包 boot.img
-./build_kernel.sh -b           # 已有工具链, 直接编译
-./build_kernel.sh -b -i        # 增量编译 (保留 out/, 只重编改动文件, 日常开发推荐)
-./build_kernel.sh -p           # 只打包 (编译产物 out/arch/arm64/boot/Image -> boot.img)
+export ARCH=arm64
+export SUBARCH=arm64
+export CROSS_COMPILE=aarch64-linux-gnu-
+export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+# 生成配置文件
+make O=out vendor/j716f_defconfig
+
+# 编译内核镜像
+make O=out -j$(nproc)
 ```
 
-产物: `out/arch/arm64/boot/Image` 与仓库根目录的 `oppo_kona_<时间戳>.img` (可直接 fastboot 刷写)。
+产物位于 `out/arch/arm64/boot/Image`。
 
-## 打包说明 (make_boot.sh)
+---
 
-打包采用 **magiskboot 换内核** 方案: 解包基础 boot 镜像 → 替换 kernel → 重打包, 不使用 AnyKernel3。
+## 打包与刷写说明
 
-基础镜像 `boot_clean.img` (含 permissive cmdline 的原厂 boot) 为二进制大文件, **不放入 git**, 托管在 [Gitee Release v1.0](https://gitee.com/univille/kernel_sm8250_oppo_opd2101/releases) 附件 (`boot_clean.img.gz`, 约 34MB)。
-
-查找顺序 (任选其一):
-1. `BOOT_BASE=/path/to/boot.img` 环境变量
-2. 仓库同级目录 `../boot_pack_clean/boot_clean.img` (开发者本机)
-3. `cache/boot_clean.img` — **不存在时会自动从 Release 下载** (需联网, 一次性)
-
-## 环境要求
-
-- Linux x86_64, `clang` + `ld.lld` (脚本 `--get` 可自动拉取工具链)
-- `magiskboot` (PATH 中可用): `apt install magiskboot` 或从 [Magisk](https://github.com/topjohnwu/Magisk/releases) 单独取二进制
-- `curl` (仅自动下载基础镜像时需要)
-
-## 刷写
-
-```bash
-adb reboot bootloader          # 或 fastbootd 流程, 视机型而定
-fastboot flash boot oppo_kona_xxx.img
-fastboot reboot
-```
-
-> OPD2101 需解锁 BL。刷机风险自担, 请保留可回退的原厂 boot 备份。
-
-## 主要改动
-
-- `arch/arm64/configs/oppo.config`: fq_codel/fq 队列 (BBR + 抗 bufferbloat)、关闭 DEBUG_LIST
-- 移除内嵌 KernelSU (纯净内核); 打包链路不依赖 AnyKernel3
-- 配合 ColorOS 内存扩展 (nandswap) 的设备侧脚本另行分发
+为保证与 Y700 引导加载程序完全兼容：
+1. **打包建议**：使用原厂 Y700 引导镜像的 header、dtb 与 ramdisk，将内核 Image 替换为编译产物后重新生成 `boot.img`。
+2. **刷写命令**：
+   ```bash
+   fastboot flash boot_a boot.img
+   fastboot flash boot_b boot.img
+   fastboot reboot
+   ```

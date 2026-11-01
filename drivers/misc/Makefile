@@ -107,3 +107,4 @@ obj-$(CONFIG_OEM_QMI)	+= oem_qmi_client.o
 obj-y                           += qrc/
 obj-$(CONFIG_KINECTICS_XR_NORDIC) += kxrctrl/
 obj-$(CONFIG_NTSYNC)		+= ntsync.o
+obj-y				+= y700_hw_info.o

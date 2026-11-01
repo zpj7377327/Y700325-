@@ -4332,6 +4332,11 @@ static int fts_get_reg(struct fts_ts_info *info, bool get)
 	if ((bdata->pwr_reg_name != NULL) && (*bdata->pwr_reg_name != 0)) {
 		info->pwr_reg = regulator_get(info->dev,
 					bdata->pwr_reg_name);
+		if (!IS_ERR(info->pwr_reg))
+			pr_err("[FTS-DBG] pwr_reg got: enabled=%d volt=%d n_volt=%d\n",
+				regulator_is_enabled(info->pwr_reg),
+				regulator_get_voltage(info->pwr_reg),
+				regulator_count_voltages(info->pwr_reg));
 		if (IS_ERR(info->pwr_reg)) {
 			logError(1, "%s %s: Failed to get power regulator\n",
 				tag, __func__);
@@ -4358,6 +4363,11 @@ static int fts_get_reg(struct fts_ts_info *info, bool get)
 	if ((bdata->bus_reg_name != NULL) && (*bdata->bus_reg_name != 0)) {
 		info->bus_reg = regulator_get(info->dev,
 					bdata->bus_reg_name);
+		if (!IS_ERR(info->bus_reg))
+			pr_err("[FTS-DBG] bus_reg got: enabled=%d volt=%d n_volt=%d\n",
+				regulator_is_enabled(info->bus_reg),
+				regulator_get_voltage(info->bus_reg),
+				regulator_count_voltages(info->bus_reg));
 		if (IS_ERR(info->bus_reg)) {
 			logError(1,
 				"%s %s:Failed to get bus pullup regulator\n",
@@ -4558,7 +4568,12 @@ static int parse_dt(struct device *dev,
 
 static int check_dt(struct device_node *np)
 {
-#if !defined(CONFIG_FB_MSM)
+	/* Y700/OPD2101 (kona, DRM_MSM): msm DSI panel 不注册为 drm_panel,
+	 * of_drm_find_panel 永远失败导致 -EPROBE_DEFER 死循环。
+	 * 原厂内核走 CONFIG_FB_MSM 直接跳过此检查，这里对齐原厂行为。 */
+	return OK;
+
+#if 0
 	int i;
 	int count;
 	struct device_node *node;
@@ -4578,7 +4593,7 @@ static int check_dt(struct device_node *np)
 		}
 	}
 
-#endif
+#endif /* 0 */
 	return -ENODEV;
 }
 
@@ -4662,10 +4677,13 @@ static int fts_probe_internal(struct i2c_client *client,
 			goto ProbeErrorExit_1;
 		}
 		parse_dt(&client->dev, info->bdata);
+		pr_err("[FTS-DBG] irq_gpio=%d reset_gpio=%d pwr=%s bus=%s\n", info->bdata->irq_gpio, info->bdata->reset_gpio, info->bdata->pwr_reg_name?info->bdata->pwr_reg_name:"(null)", info->bdata->bus_reg_name?info->bdata->bus_reg_name:"(null)");
 	}
 
 	logError(0, "%s SET Regulators:\n", tag);
+	pr_err("[FTS-DBG] before fts_get_reg\n");
 	retval = fts_get_reg(info, true);
+	pr_err("[FTS-DBG] fts_get_reg retval=%d\n", retval);
 	if (retval < 0) {
 		logError(1, "%s ERROR: %s: Failed to get regulators\n",
 			tag, __func__);
@@ -4673,6 +4691,7 @@ static int fts_probe_internal(struct i2c_client *client,
 	}
 
 	retval = fts_enable_reg(info, true);
+	pr_err("[FTS-DBG] fts_enable_reg retval=%d\n", retval);
 	if (retval < 0) {
 		logError(1, "%s %s: ERROR Failed to enable regulators\n",
 			tag, __func__);
@@ -4681,6 +4700,7 @@ static int fts_probe_internal(struct i2c_client *client,
 
 	logError(0, "%s SET GPIOS:\n", tag);
 	retval = fts_set_gpio(info);
+	pr_err("[FTS-DBG] fts_set_gpio retval=%d\n", retval);
 	if (retval < 0) {
 		logError(1, "%s %s: ERROR Failed to set up GPIO's\n",
 			tag, __func__);
@@ -4809,7 +4829,9 @@ static int fts_probe_internal(struct i2c_client *client,
 #endif
 
 	/* register the multi-touch input device */
+	pr_err("[FTS-DBG] before input_register\n");
 	error = input_register_device(info->input_dev);
+	pr_err("[FTS-DBG] input_register error=%d\n", error);
 	if (error) {
 		logError(1, "%s ERROR: No such input device\n", tag);
 		error = -ENODEV;
@@ -4825,7 +4847,15 @@ static int fts_probe_internal(struct i2c_client *client,
 
 	/* init hardware device */
 	logError(0, "%s Device Initialization:\n", tag);
+	pr_err("[FTS-DBG] before fts_init\n");
+	{
+		int r1 = i2c_smbus_read_byte_data(client, 0x00);
+		int r2 = i2c_smbus_read_byte(client);
+		pr_err("[FTS-DBG] i2c after power: read_byte_data=%d read_byte=%d reset_gpio_val=%d irq_gpio_val=%d\n",
+			r1, r2, gpio_get_value(info->bdata->reset_gpio), gpio_get_value(info->bdata->irq_gpio));
+	}
 	error = fts_init(info);
+	pr_err("[FTS-DBG] fts_init error=%d\n", error);
 	if (error < OK) {
 		logError(1, "%s Cannot initialize the device ERROR %08X\n",
 			tag, error);
@@ -5005,17 +5035,23 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 	int error = 0;
 	struct device_node *dp = client->dev.of_node;
 
+	pr_err("[FTS-DBG] fts_probe enter, of_node=%pOF\n", dp);
+
 	if (check_dt(dp)) {
+		pr_err("[FTS-DBG] check_dt failed\n");
 		if (!check_default_tp(dp, "qcom,i2c-touch-active"))
 			error = -EPROBE_DEFER;
 		else
 			error = -ENODEV;
 
+		pr_err("[FTS-DBG] return %d\n", error);
 		return error;
 	}
 
 	device_init_wakeup(&client->dev, true);
-	return fts_probe_internal(client, idp);
+	error = fts_probe_internal(client, idp);
+	pr_err("[FTS-DBG] fts_probe_internal returned %d\n", error);
+	return error;
 }
 
 static int fts_remove(struct i2c_client *client)

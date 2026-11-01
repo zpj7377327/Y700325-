@@ -119,19 +119,22 @@ static void nvt_irq_enable(bool enable)
 
 	if (enable) {
 		if (!ts->irq_enabled) {
-			enable_irq(ts->client->irq);
+			enable_irq(ts->irq);
 			ts->irq_enabled = true;
 		}
 	} else {
 		if (ts->irq_enabled) {
-			disable_irq(ts->client->irq);
+			disable_irq(ts->irq);
 			ts->irq_enabled = false;
 		}
 	}
 
-	desc = irq_to_desc(ts->client->irq);
+	desc = irq_to_desc(ts->irq);
 	NVT_LOG("enable=%d, desc->depth=%d\n", enable, desc->depth);
 }
+
+static int32_t CTP_SPI_READ(struct spi_device *client, uint8_t *buf, uint16_t len);
+static int32_t CTP_SPI_WRITE(struct spi_device *client, uint8_t *buf, uint16_t len);
 
 /*******************************************************
  * Description:
@@ -146,6 +149,13 @@ int32_t CTP_I2C_READ(struct i2c_client *client, uint16_t address, uint8_t *buf,
 	struct i2c_msg msgs[2];
 	int32_t ret = -1;
 	int32_t retries = 0;
+
+	if (!client) {
+		if (ts && ts->spi)
+			return CTP_SPI_READ(ts->spi, buf, len);
+		NVT_ERR("client is NULL and no spi!\n");
+		return -EINVAL;
+	}
 
 	mutex_lock(&ts->xbuf_lock);
 
@@ -191,6 +201,13 @@ int32_t CTP_I2C_WRITE(struct i2c_client *client, uint16_t address, uint8_t *buf,
 	int32_t ret = -1;
 	int32_t retries = 0;
 
+	if (!client) {
+		if (ts && ts->spi)
+			return CTP_SPI_WRITE(ts->spi, buf, len);
+		NVT_ERR("client is NULL and no spi!\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&ts->xbuf_lock);
 
 	msg.flags = !I2C_M_RD;
@@ -217,6 +234,107 @@ int32_t CTP_I2C_WRITE(struct i2c_client *client, uint16_t address, uint8_t *buf,
 
 /*******************************************************
  * Description:
+ *     Novatek touchscreen spi read/write core function.
+ *
+ * return:
+ *     Executive outcomes. 0---succeed.
+ *******************************************************/
+static int32_t spi_read_write(struct spi_device *client, uint8_t *buf, size_t len, uint8_t *rbuf, SPI_RW rw)
+{
+	struct spi_message m;
+	struct spi_transfer t = {
+		.len    = len,
+	};
+	int status;
+
+	switch (rw) {
+	case SPIREAD:
+		t.tx_buf = &buf[0];
+		t.rx_buf = rbuf;
+		t.len    = (len + DUMMY_BYTES);
+		break;
+
+	case SPIWRITE:
+		t.tx_buf = buf;
+		break;
+	}
+
+	spi_message_init(&m);
+	spi_message_add_tail(&t, &m);
+	status = spi_sync(client, &m);
+	return status;
+}
+
+/*******************************************************
+ * Description:
+ *     Novatek touchscreen spi read function.
+ *
+ * return:
+ *     Executive outcomes. 0---succeed. -5---I/O error
+ *******************************************************/
+static int32_t CTP_SPI_READ(struct spi_device *client, uint8_t *buf, uint16_t len)
+{
+	int32_t ret = -1;
+	int32_t retries = 0;
+	uint8_t rbuf[SPI_TANSFER_LEN + 1] = {0};
+
+	if (len + DUMMY_BYTES > sizeof(rbuf)) {
+		NVT_ERR("len %d exceeds rbuf size\n", len);
+		return -EINVAL;
+	}
+
+	mutex_lock(&ts->xbuf_lock);
+	buf[0] = SPI_READ_MASK(buf[0]);
+
+	while (retries < 5) {
+		ret = spi_read_write(client, buf, len, rbuf, SPIREAD);
+		if (ret == 0) break;
+		retries++;
+	}
+
+	if (unlikely(retries == 5)) {
+		NVT_ERR("read error, ret=%d\n", ret);
+		ret = -EIO;
+	} else {
+		memcpy((buf + 1), (rbuf + 2), (len - 1));
+	}
+
+	mutex_unlock(&ts->xbuf_lock);
+	return ret;
+}
+
+/*******************************************************
+ * Description:
+ *     Novatek touchscreen spi write function.
+ *
+ * return:
+ *     Executive outcomes. 0---succeed. -5---I/O error
+ *******************************************************/
+static int32_t CTP_SPI_WRITE(struct spi_device *client, uint8_t *buf, uint16_t len)
+{
+	int32_t ret = -1;
+	int32_t retries = 0;
+
+	mutex_lock(&ts->xbuf_lock);
+	buf[0] = SPI_WRITE_MASK(buf[0]);
+
+	while (retries < 5) {
+		ret = spi_read_write(client, buf, len, NULL, SPIWRITE);
+		if (ret == 0)	break;
+		retries++;
+	}
+
+	if (unlikely(retries == 5)) {
+		NVT_ERR("write error, ret=%d\n", ret);
+		ret = -EIO;
+	}
+
+	mutex_unlock(&ts->xbuf_lock);
+	return ret;
+}
+
+/*******************************************************
+ * Description:
  *     Novatek touchscreen set index/page/addr address.
  *
  * return:
@@ -227,9 +345,14 @@ int32_t nvt_set_page(uint16_t i2c_addr, uint32_t addr)
 	uint8_t buf[4] = {0};
 
 	buf[0] = 0xFF;	//set index/page/addr command
+	if (ts && ts->spi) {
+		buf[1] = (addr >> 15) & 0xFF;
+		buf[2] = (addr >> 7) & 0xFF;
+		return CTP_SPI_WRITE(ts->spi, buf, 3);
+	}
+
 	buf[1] = (addr >> 16) & 0xFF;
 	buf[2] = (addr >> 8) & 0xFF;
-
 	return CTP_I2C_WRITE(ts->client, i2c_addr, buf, 3);
 }
 
@@ -933,10 +1056,18 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 	mutex_lock(&ts->lock);
 
-	ret = CTP_I2C_READ(ts->client, I2C_FW_Address, point_data, POINT_DATA_LEN + 1);
-	if (ret < 0) {
-		NVT_ERR("CTP_I2C_READ failed.(%d)\n", ret);
-		goto XFER_ERROR;
+	if (ts->spi) {
+		ret = CTP_SPI_READ(ts->spi, point_data, POINT_DATA_LEN + 1);
+		if (ret < 0) {
+			NVT_ERR("CTP_SPI_READ failed.(%d)\n", ret);
+			goto XFER_ERROR;
+		}
+	} else {
+		ret = CTP_I2C_READ(ts->client, I2C_FW_Address, point_data, POINT_DATA_LEN + 1);
+		if (ret < 0) {
+			NVT_ERR("CTP_I2C_READ failed.(%d)\n", ret);
+			goto XFER_ERROR;
+		}
 	}
 
 	if (nvt_fw_recovery(point_data)) {
@@ -1362,7 +1493,10 @@ static int32_t nvt_ts_late_probe(struct i2c_client *client,
 	snprintf(ts->phys, sizeof(ts->phys), "input/ts");
 	ts->input_dev->name = NVT_TS_NAME;
 	ts->input_dev->phys = ts->phys;
-	ts->input_dev->id.bustype = BUS_I2C;
+	if (ts->spi)
+		ts->input_dev->id.bustype = BUS_SPI;
+	else
+		ts->input_dev->id.bustype = BUS_I2C;
 
 	//---register input device---
 	ret = input_register_device(ts->input_dev);
@@ -1372,18 +1506,20 @@ static int32_t nvt_ts_late_probe(struct i2c_client *client,
 	}
 
 	//---set int-pin & request irq---
-	client->irq = gpio_to_irq(ts->irq_gpio);
-	if (client->irq) {
+	ts->irq = gpio_to_irq(ts->irq_gpio);
+	if (client)
+		client->irq = ts->irq;
+	if (ts->irq) {
 		NVT_LOG("int_trigger_type=%d\n", ts->int_trigger_type);
 		ts->irq_enabled = true;
-		ret = request_threaded_irq(client->irq, NULL, nvt_ts_work_func,
+		ret = request_threaded_irq(ts->irq, NULL, nvt_ts_work_func,
 				ts->int_trigger_type | IRQF_ONESHOT, NVT_I2C_NAME, ts);
 		if (ret != 0) {
 			NVT_ERR("request irq failed. ret=%d\n", ret);
 			goto err_int_request_failed;
 		} else {
 			nvt_irq_enable(false);
-			NVT_LOG("request irq %d succeed\n", client->irq);
+			NVT_LOG("request irq %d succeed\n", ts->irq);
 		}
 	}
 
@@ -1479,10 +1615,13 @@ err_create_nvt_fwu_wq_failed:
 #if WAKEUP_GESTURE
 	device_init_wakeup(&ts->input_dev->dev, 0);
 #endif
-	free_irq(client->irq, ts);
+	if (ts->irq)
+		free_irq(ts->irq, ts);
 err_int_request_failed:
-	input_unregister_device(ts->input_dev);
-	ts->input_dev = NULL;
+	if (ts->input_dev) {
+		input_unregister_device(ts->input_dev);
+		ts->input_dev = NULL;
+	}
 err_input_register_device_failed:
 	if (ts->input_dev) {
 		input_free_device(ts->input_dev);
@@ -1637,7 +1776,8 @@ static int32_t nvt_ts_remove(struct i2c_client *client)
 #endif
 
 	nvt_irq_enable(false);
-	free_irq(client->irq, ts);
+	if (ts->irq)
+		free_irq(ts->irq, ts);
 
 	mutex_destroy(&ts->xbuf_lock);
 	mutex_destroy(&ts->lock);
@@ -1749,7 +1889,8 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	buf[1] = 0x13;
 	CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
 
-	enable_irq_wake(ts->client->irq);
+	if (ts->irq)
+		enable_irq_wake(ts->irq);
 
 	NVT_LOG("Enabled touch wakeup gesture\n");
 
@@ -1858,12 +1999,12 @@ static int nvt_drm_notifier_callback(struct notifier_block *self,
 	if (event == DRM_PANEL_EARLY_EVENT_BLANK) {
 		if (*blank == DRM_PANEL_BLANK_POWERDOWN) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-			nvt_ts_suspend(&ts->client->dev);
+			nvt_ts_suspend(ts->client ? &ts->client->dev : (ts->spi ? &ts->spi->dev : NULL));
 		}
 	} else if (event == DRM_PANEL_EVENT_BLANK) {
 		if (*blank == DRM_PANEL_BLANK_UNBLANK) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-			nvt_ts_resume(&ts->client->dev);
+			nvt_ts_resume(ts->client ? &ts->client->dev : (ts->spi ? &ts->spi->dev : NULL));
 		}
 	}
 
@@ -1884,13 +2025,13 @@ static int nvt_fb_notifier_callback(struct notifier_block *self,
 		blank = evdata->data;
 		if (*blank == FB_BLANK_POWERDOWN) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-			nvt_ts_suspend(&ts->client->dev);
+			nvt_ts_suspend(ts->client ? &ts->client->dev : (ts->spi ? &ts->spi->dev : NULL));
 		}
 	} else if (evdata && evdata->data && event == FB_EVENT_BLANK) {
 		blank = evdata->data;
 		if (*blank == FB_BLANK_UNBLANK) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-			nvt_ts_resume(&ts->client->dev);
+			nvt_ts_resume(ts->client ? &ts->client->dev : (ts->spi ? &ts->spi->dev : NULL));
 		}
 	}
 
@@ -1933,6 +2074,11 @@ static struct of_device_id nvt_match_table[] = {
 	{ .compatible = "novatek,NVT-ts",},
 	{ },
 };
+
+static const struct of_device_id nvt_spi_match_table[] = {
+	{ .compatible = "novatek,NVT-ts-spi", },
+	{ },
+};
 #endif
 
 static struct i2c_driver nvt_i2c_driver = {
@@ -1944,6 +2090,128 @@ static struct i2c_driver nvt_i2c_driver = {
 		.name	= NVT_I2C_NAME,
 #ifdef CONFIG_OF
 		.of_match_table = nvt_match_table,
+#endif
+	},
+};
+
+static const struct spi_device_id nvt_ts_spi_id[] = {
+	{ NVT_SPI_NAME, 0 },
+	{ }
+};
+
+static int32_t nvt_ts_spi_probe(struct spi_device *spi)
+{
+	int32_t ret = 0;
+#if defined(CONFIG_DRM)
+	struct device_node *dp = spi->dev.of_node;
+#endif
+
+	NVT_LOG("SPI probe start\n");
+
+#if defined(CONFIG_DRM)
+	if (nvt_ts_check_dt(dp)) {
+		NVT_LOG("DRM panel not ready or check dt failed, deferring...\n");
+		return -EPROBE_DEFER;
+	}
+#endif
+
+	ts = devm_kzalloc(&spi->dev, sizeof(struct nvt_ts_data), GFP_KERNEL);
+	if (ts == NULL) {
+		NVT_ERR("failed to allocated memory for nvt ts data\n");
+		return -ENOMEM;
+	}
+
+	ts->spi = spi;
+	spi_set_drvdata(spi, ts);
+
+	//---parse dts---
+	nvt_parse_dt(&spi->dev);
+
+	//---setup spi mode---
+	spi->mode = SPI_MODE_0;
+	spi->bits_per_word = 8;
+	ret = spi_setup(spi);
+	if (ret) {
+		NVT_ERR("spi_setup failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	mutex_init(&ts->lock);
+	mutex_init(&ts->xbuf_lock);
+
+#if defined(CONFIG_DRM)
+	ts->drm_notif.notifier_call = nvt_drm_notifier_callback;
+	if (active_panel && drm_panel_notifier_register(active_panel, &ts->drm_notif) < 0) {
+		NVT_ERR("register notifier failed!\n");
+	}
+#endif
+
+	if (!active_panel) {
+		ret = nvt_ts_late_probe(NULL, NULL);
+		if (ret) {
+			NVT_ERR("nvt_ts_late_probe failed! ret=%d\n", ret);
+			return ret;
+		}
+	}
+
+	NVT_LOG("SPI probe finished successfully\n");
+	return 0;
+}
+
+static int32_t nvt_ts_spi_remove(struct spi_device *spi)
+{
+	NVT_LOG("Removing SPI driver...\n");
+
+#if defined(CONFIG_DRM_PANEL)
+	if (active_panel)
+		drm_panel_notifier_unregister(active_panel, &ts->drm_notif);
+#elif defined(CONFIG_FB)
+	if (fb_unregister_client(&ts->fb_notif))
+		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
+#endif
+
+#if NVT_TOUCH_MP
+	nvt_mp_proc_deinit();
+#endif
+#if NVT_TOUCH_EXT_PROC
+	nvt_extra_proc_deinit();
+#endif
+#if NVT_TOUCH_PROC
+	nvt_flash_proc_deinit();
+#endif
+
+	nvt_irq_enable(false);
+	if (ts->irq)
+		free_irq(ts->irq, ts);
+
+	mutex_destroy(&ts->xbuf_lock);
+	mutex_destroy(&ts->lock);
+
+	nvt_gpio_deconfig(ts);
+
+	if (ts->input_dev) {
+		input_unregister_device(ts->input_dev);
+		ts->input_dev = NULL;
+	}
+
+	spi_set_drvdata(spi, NULL);
+
+	if (ts) {
+		kfree(ts);
+		ts = NULL;
+	}
+
+	return 0;
+}
+
+static struct spi_driver nvt_spi_driver = {
+	.probe		= nvt_ts_spi_probe,
+	.remove		= nvt_ts_spi_remove,
+	.id_table	= nvt_ts_spi_id,
+	.driver = {
+		.name	= NVT_SPI_NAME,
+#ifdef CONFIG_OF
+		.of_match_table = nvt_spi_match_table,
 #endif
 	},
 };
@@ -1964,12 +2232,16 @@ static int32_t __init nvt_driver_init(void)
 	ret = i2c_add_driver(&nvt_i2c_driver);
 	if (ret) {
 		NVT_ERR("failed to add i2c driver");
-		goto err_driver;
+	}
+
+	//---add spi driver---
+	ret = spi_register_driver(&nvt_spi_driver);
+	if (ret) {
+		NVT_ERR("failed to add spi driver\n");
 	}
 
 	NVT_LOG("finished\n");
 
-err_driver:
 	return ret;
 }
 
@@ -1982,6 +2254,7 @@ err_driver:
  ********************************************************/
 static void __exit nvt_driver_exit(void)
 {
+	spi_unregister_driver(&nvt_spi_driver);
 	i2c_del_driver(&nvt_i2c_driver);
 }
 

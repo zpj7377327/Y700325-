@@ -11,7 +11,7 @@ subdir-ccflags-y += -Werror=parentheses
 subdir-ccflags-y += -DOPLUS_CHG_KO_BUILD
 ccflags-$(CONFIG_OPLUS_DYNAMIC_CONFIG_CHARGER) += -I$(srctree)/drivers/power/oplus/config
 
-ifdef gki_support
+ifdef gki_support_disabled_y700
 
 ifeq ($(CONFIG_OPLUS_CHARGER_MTK6983S),y)
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/typec/tcpc/inc

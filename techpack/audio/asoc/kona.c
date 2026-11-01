@@ -8013,9 +8013,7 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 	u32 val = 0;
 	u32 wcn_btfm_intf = 0;
 	#ifdef OPLUS_ARCH_EXTENDS
-	#ifdef OPLUS_FEATURE_PLATFORM_LITO
-	u32 wsa_bolero_codec = 0;
-	#endif /* OPLUS_FEATURE_PLATFORM_LITO */
+	u32 wsa_bolero_codec = 0; /* Y700: 两分支都需要 */
 	#endif /* OPLUS_ARCH_EXTENDS */
 
 	const struct of_device_id *match;
@@ -8035,13 +8033,13 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		       sizeof(msm_common_dai_links));
 		total_links += ARRAY_SIZE(msm_common_dai_links);
 
-		#ifndef OPLUS_FEATURE_PLATFORM_LITO
+		#ifdef OPLUS_FEATURE_PLATFORM_LITO_Y700_DISABLED
 		memcpy(msm_kona_dai_links + total_links,
 		       msm_bolero_fe_dai_links,
 		       sizeof(msm_bolero_fe_dai_links));
 		total_links +=
 			ARRAY_SIZE(msm_bolero_fe_dai_links);
-		#else /* OPLUS_FEATURE_PLATFORM_LITO */
+		#else /* Y700: 按 DT 条件挂入 WSA link */
 		rc = of_property_read_u32(dev->of_node, "qcom,wsa-bolero-codec",
 					  &wsa_bolero_codec);
 		if (rc) {
@@ -8071,13 +8069,13 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 		       sizeof(msm_common_be_dai_links));
 		total_links += ARRAY_SIZE(msm_common_be_dai_links);
 
-		#ifndef OPLUS_FEATURE_PLATFORM_LITO
+		#ifdef OPLUS_FEATURE_PLATFORM_LITO_Y700_DISABLED
 		memcpy(msm_kona_dai_links + total_links,
 		       msm_wsa_cdc_dma_be_dai_links,
 		       sizeof(msm_wsa_cdc_dma_be_dai_links));
 		total_links +=
 			ARRAY_SIZE(msm_wsa_cdc_dma_be_dai_links);
-		#else /* OPLUS_FEATURE_PLATFORM_LITO */
+		#else /* Y700: 按 DT 条件挂入 WSA link */
 		if (wsa_bolero_codec) {
 			dev_dbg(dev, "%s(): WSAmacro in bolero codec present\n",
 				__func__);

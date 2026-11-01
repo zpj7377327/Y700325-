@@ -21,6 +21,7 @@
 
 #include <linux/delay.h>
 #include <linux/i2c.h>
+#include <linux/spi/spi.h>
 #include <linux/input.h>
 #include <linux/uaccess.h>
 
@@ -31,6 +32,18 @@
 #include "nt36xxx_mem_map.h"
 
 #define NVT_DEBUG 1
+
+//---SPI READ/WRITE---
+#define NVT_SPI_NAME "NVT-ts-spi"
+#define SPI_WRITE_MASK(a)	((a) | 0x80)
+#define SPI_READ_MASK(a)	((a) & 0x7F)
+#define DUMMY_BYTES (1)
+#define SPI_TANSFER_LEN		512
+
+typedef enum {
+    SPIWRITE = 1,
+    SPIREAD  = 2
+} SPI_RW;
 
 //---GPIO number---
 #define NVTTOUCH_RST_PIN 980
@@ -82,7 +95,7 @@ extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 #if WAKEUP_GESTURE
 extern const uint16_t gesture_key_array[];
 #endif
-#define BOOT_UPDATE_FIRMWARE 1
+#define BOOT_UPDATE_FIRMWARE 0
 #define BOOT_UPDATE_FIRMWARE_NAME "novatek_ts_fw.bin"
 
 //---ESD Protect.---
@@ -91,6 +104,8 @@ extern const uint16_t gesture_key_array[];
 
 struct nvt_ts_data {
 	struct i2c_client *client;
+	struct spi_device *spi;
+	int32_t irq;
 	struct input_dev *input_dev;
 	struct delayed_work nvt_fwu_work;
 	uint16_t addr;
@@ -128,6 +143,7 @@ struct nvt_ts_data {
 struct nvt_flash_data{
 	rwlock_t lock;
 	struct i2c_client *client;
+	struct spi_device *spi;
 };
 #endif
 

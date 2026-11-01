@@ -29,6 +29,10 @@
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #endif
+#if defined(CONFIG_FB) || defined(CONFIG_DRM)
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif
 #ifdef CONFIG_DRM
 #include <linux/msm_drm_notify.h>
 #endif
@@ -2150,7 +2154,7 @@ static int goodix_ts_remove(struct platform_device *pdev)
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops dev_pm_ops = {
-#if !defined(CONFIG_FB) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if !defined(CONFIG_FB) && !defined(CONFIG_HAS_EARLYSUSPEND) && !defined(CONFIG_DRM)
 	.suspend = goodix_ts_pm_suspend,
 	.resume = goodix_ts_pm_resume,
 #endif

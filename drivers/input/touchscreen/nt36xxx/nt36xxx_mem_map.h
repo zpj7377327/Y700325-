@@ -225,6 +225,8 @@ static const struct nvt_ts_trim_id_table trim_id_table[] = {
 		.mmap = &NT36772_memory_map,  .hwinfo = &NT36772_hw_info},
 	{.id = {0xFF, 0xFF, 0xFF, 0x25, 0x65, 0x03}, .mask = {0, 0, 0, 1, 1, 1},
 		.mmap = &NT36525_memory_map,  .hwinfo = &NT36525_hw_info},
+	{.id = {0xFF, 0xFF, 0xFF, 0x23, 0x65, 0x03}, .mask = {0, 0, 0, 1, 1, 1},
+		.mmap = &NT36525_memory_map,  .hwinfo = &NT36525_hw_info},
 	{.id = {0xFF, 0xFF, 0xFF, 0x76, 0x66, 0x03}, .mask = {0, 0, 0, 1, 1, 1},
 		.mmap = &NT36676F_memory_map, .hwinfo = &NT36676F_hw_info}
 };

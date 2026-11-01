@@ -1,4 +1,4 @@
-#ifdef OPLUS_FEATURE_HEALTHINFO
+# Y700 port: OPLUS_FEATURE_HEALTHINFO 宏门已移除
 config OPLUS_HEALTHINFO
 bool "config healthinfo"
 help
@@ -8,4 +8,4 @@ config MMAP_LOCK_OPT
 	default n
 	help
 	  reduce sleep time in mmap lock
-#endif /* OPLUS_FEATURE_HEALTHINFO */
+

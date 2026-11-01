@@ -141,7 +141,7 @@ struct ssusb_redriver {
 	u64	debug_val;
 };
 
-extern register_hardware_info(const char *name, const char *model);
+extern int register_hardware_info(const char *name, const char *model);
 static void ssusb_redriver_debugfs_entries(struct ssusb_redriver *redriver);
 
 static int redriver_i2c_reg_get(struct ssusb_redriver *redriver,

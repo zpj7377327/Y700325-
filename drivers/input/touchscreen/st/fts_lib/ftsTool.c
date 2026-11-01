@@ -945,6 +945,7 @@ int fts_system_reset(void)
 		} else {
 			res = pollForEvent(&event_to_search, 1,
 					readData, GENERAL_TIMEOUT);
+			pr_err("[FTS-DBG] reset attempt %d: pollForEvent res=%d\n", i, res);
 			if (res < OK) {
 				logError(0, "%s %s: ERROR %02X\n",
 					tag, __func__, res);

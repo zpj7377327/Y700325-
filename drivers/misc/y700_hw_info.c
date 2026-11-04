@@ -32,8 +32,17 @@ int register_hardware_info(const char *name, const char *model)
 }
 EXPORT_SYMBOL(register_hardware_info);
 
-/* 说明：get_cached_platform_id 由 oplus_wakelock_profiler.c 提供（stock 配置
- * 编译该文件），此处不再重复定义，避免链接冲突。 */
+/*
+ * get_cached_platform_id：OPPO 树里它只在通用 oplus_wakelock_profiler.c 里，
+ * 但该 Makefile 在 CONFIG_OPLUS_POWER_QCOM=y 时只编 qcom 变体文件，不编通用
+ * 文件，导致 irq-gic/ipcc/nwpower 链接不到它。这里按本机 SoC 补一个：
+ * Y700 1st gen 是 kona（sm8250），通用文件里 KONA 定义为 1，调用处只比较
+ * == KONA 做唤醒原因命名，所以返回 1 与原语义一致，不是随意打桩。
+ */
+int get_cached_platform_id(void)
+{
+	return 1; /* KONA */
+}
 
 /* 说明：opticalfp_irq_handler_register 由 oplus_fp_common.c 提供（stock 配置
  * CONFIG_OPLUS_FINGERPRINT 相关开启）。此处不再重复定义，避免链接冲突。 */

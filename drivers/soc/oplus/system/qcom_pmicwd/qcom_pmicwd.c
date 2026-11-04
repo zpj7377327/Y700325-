@@ -91,6 +91,7 @@ static int raise_wdt_issue(void) {
         preempt_disable();
         local_irq_disable();
         while (1);
+        return 0;
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))

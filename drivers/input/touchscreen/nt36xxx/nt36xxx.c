@@ -2108,10 +2108,20 @@ static int32_t nvt_ts_spi_probe(struct spi_device *spi)
 
 	NVT_LOG("SPI probe start\n");
 
-#if defined(CONFIG_DRM)
+#if defined(CONFIG_DRM_PANEL)
+	/*
+	 * Y700 1st gen (TB-9707F): the panel in the stock dtbo is
+	 * qcom,mdss_dsi_nt36523_panel_vid, i.e. an MDSS panel, not a
+	 * DRM panel. of_drm_find_panel() inside nvt_ts_check_dt()
+	 * can therefore never succeed, and returning -EPROBE_DEFER
+	 * here defers the SPI touch probe forever: display works,
+	 * touch never appears. Do not defer on this check; continue
+	 * to nvt_ts_late_probe() and let the chip trim check decide.
+	 * (The original guard was also wrong: nvt_ts_check_dt() is
+	 * only defined under CONFIG_DRM_PANEL, not CONFIG_DRM.)
+	 */
 	if (nvt_ts_check_dt(dp)) {
-		NVT_LOG("DRM panel not ready or check dt failed, deferring...\n");
-		return -EPROBE_DEFER;
+		NVT_LOG("panel is not a DRM panel (MDSS), continuing without DRM notifier\n");
 	}
 #endif
 

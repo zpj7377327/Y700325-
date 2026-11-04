@@ -54,7 +54,7 @@ static bool pool_refill_ok(struct ion_page_pool *pool)
 	return true;
 }
 
-inline struct page *ion_page_pool_alloc_pages(struct ion_page_pool *pool)
+struct page *ion_page_pool_alloc_pages(struct ion_page_pool *pool)
 {
 	if (fatal_signal_pending(current))
 		return NULL;

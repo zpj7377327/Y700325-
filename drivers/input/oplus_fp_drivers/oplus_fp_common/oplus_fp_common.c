@@ -4,6 +4,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/uaccess.h>
 #include <linux/proc_fs.h>
 #include <soc/oplus/system/oplus_project.h>
 #include <linux/slab.h>
@@ -25,7 +26,6 @@ extern char *saved_command_line;
 #elif defined(QCOM_PLATFORM)
 #include <linux/uaccess.h>
 #else
-#include <soc/qcom/smem.h>
 #endif
 
 #ifdef FP_TEE_BINDE_CORE_ENABLE

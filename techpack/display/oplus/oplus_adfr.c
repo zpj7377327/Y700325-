@@ -155,7 +155,7 @@ enum oplus_vsync_mode oplus_adfr_get_vsync_mode(void)
 	return (enum oplus_vsync_mode)ADFR_GET_VSYNC_SWITCH_MODE(oplus_adfr_config);
 }
 
-inline bool oplus_adfr_is_support(void)
+bool oplus_adfr_is_support(void)
 {
 	return  (bool)(ADFR_GET_GLOBAL_CONFIG(oplus_adfr_config) &&
 		!(oplus_adfr_debug & OPLUS_ADFR_DEBUG_GLOBAL_DISABLE));

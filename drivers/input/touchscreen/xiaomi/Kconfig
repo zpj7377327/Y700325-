@@ -1,0 +1,19 @@
+config TOUCHSCREEN_XIAOMI_TOUCHFEATURE
+	tristate "Xiaomi Touch Feature"
+	depends on INPUT_TOUCHSCREEN
+	help
+	  Say Y here if you enable xiaomi touch feature.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here:
+
+config TOUCHSCREEN_SUPPORT_NEW_GAME_MODE
+	bool "Xiaomi touch new game mode enum (Aim/Tap/Expert)"
+	default y
+	help
+	  Required by the elish NT36523 driver: its touch-mode table uses
+	  Touch_Aim_Sensitivity / Touch_Tap_Stability / Touch_Expert_Mode,
+	  which are only defined when this is set. Upstream elish enables
+	  it via the focaltech driver Kconfig; here it is kept with the
+	  xiaomi touchfeature driver it actually belongs to.

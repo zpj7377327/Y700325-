@@ -1,0 +1,81 @@
+  GEN     ./Makefile
+  Using .. as source for kernel
+  CALL    ../scripts/checksyscalls.sh
+  CHK     include/generated/compile.h
+  CHK     kernel/kheaders_data.tar.xz
+../firmware/Makefile:45: target 'firmware/qca6390/bdwlan.elf.gen.S' given more than once in the same rule
+  AS      firmware/bdwlan.elf.gen.o
+  AR      firmware/built-in.a
+../drivers/kernelsu/Makefile:28: "KSU_GIT_VERSION not defined! It is better to make KernelSU a git submodule!"
+-- KernelSU Manager signature size: 0x033b
+-- KernelSU Manager signature hash: c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6
+  CC      drivers/misc/aw8697_haptic/aw8697.o
+In file included from ../include/linux/printk.h:7,
+                 from ../include/linux/kernel.h:13,
+                 from ../include/linux/list.h:9,
+                 from ../include/linux/module.h:9,
+                 from ../drivers/misc/aw8697_haptic/aw8697.c:6:
+../drivers/misc/aw8697_haptic/aw8697.c: In function ‘aw8697_ram_loaded’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%s’ expects argument of type ‘char *’, but argument 3 has type ‘char (*)[30]’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:11:25: note: in expansion of macro ‘KERN_SOH’
+   11 | #define KERN_ERR        KERN_SOH "3"    /* error conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:304:16: note: in expansion of macro ‘KERN_ERR’
+  304 |         printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~
+../drivers/misc/aw8697_haptic/aw8697.c:6925:9: note: in expansion of macro ‘pr_err’
+ 6925 |         pr_err("%s: failed to read %s\n", __func__, aw8697_ram_name);
+      |         ^~~~~~
+../drivers/misc/aw8697_haptic/aw8697.c: In function ‘aw8697_haptic_read_f0’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%d’ expects argument of type ‘int’, but argument 3 has type ‘long unsigned int’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:11:25: note: in expansion of macro ‘KERN_SOH’
+   11 | #define KERN_ERR        KERN_SOH "3"    /* error conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:304:16: note: in expansion of macro ‘KERN_ERR’
+  304 |         printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~
+../drivers/misc/aw8697_haptic/aw8697.c:7881:9: note: in expansion of macro ‘pr_err’
+ 7881 |         pr_err("%s f0_tmp=%d, error  here \n", __func__, f0_tmp);
+      |         ^~~~~~
+../drivers/misc/aw8697_haptic/aw8697.c: In function ‘aw8697_haptic_read_cont_f0’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%d’ expects argument of type ‘int’, but argument 3 has type ‘long unsigned int’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:11:25: note: in expansion of macro ‘KERN_SOH’
+   11 | #define KERN_ERR        KERN_SOH "3"    /* error conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:304:16: note: in expansion of macro ‘KERN_ERR’
+  304 |         printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~
+../drivers/misc/aw8697_haptic/aw8697.c:7911:9: note: in expansion of macro ‘pr_err’
+ 7911 |         pr_err("%s f0_tmp=%d, error  here \n", __func__, f0_tmp);
+      |         ^~~~~~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  AR      drivers/misc/aw8697_haptic/built-in.a
+  AR      drivers/misc/built-in.a
+  CC      drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.o
+  AR      drivers/staging/qcacld-3.0/built-in.a
+  AR      drivers/staging/built-in.a
+  AR      drivers/built-in.a
+  GEN     .version
+  CHK     include/generated/compile.h
+  UPD     include/generated/compile.h
+  CC      init/version.o
+  AR      init/built-in.a
+  AR      built-in.a
+  MODPOST vmlinux.o
+  KSYM    .tmp_kallsyms1.o
+  KSYM    .tmp_kallsyms2.o
+  LD      vmlinux
+  SORTEX  vmlinux
+  SYSMAP  System.map
+find: ‘arch/arm64/boot/dts/’: No such file or directory
+find: ‘arch/arm64/boot/dts/’: No such file or directory
+  OBJCOPY arch/arm64/boot/Image
+BUILD EXIT: 0

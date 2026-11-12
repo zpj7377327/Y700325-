@@ -1,0 +1,431 @@
+  GEN     ./Makefile
+scripts/kconfig/conf  --syncconfig Kconfig
+  GEN     ./Makefile
+  Using .. as source for kernel
+  CALL    ../scripts/checksyscalls.sh
+  CHK     include/generated/compile.h
+  GZIP    kernel/config_data.gz
+  CHK     kernel/kheaders_data.tar.xz
+../firmware/Makefile:45: target 'firmware/qca6390/bdwlan.elf.gen.S' given more than once in the same rule
+  AR      sound/soc/codecs/built-in.a
+  AS      firmware/bdwlan.elf.gen.o
+  AR      firmware/built-in.a
+  AR      sound/soc/built-in.a
+  AR      sound/built-in.a
+  GEN     kernel/kheaders_data.tar.xz
+  CC      techpack/audio/asoc/codecs/bolero/bolero-cdc.o
+  CC      techpack/audio/dsp/codecs/q6audio_v2.o
+  CC      techpack/audio/dsp/codecs/q6audio_v2_aio.o
+  CC      techpack/audio/dsp/codecs/audio_utils_aio.o
+  CC      techpack/audio/asoc/codecs/bolero/bolero-cdc-utils.o
+  CC      techpack/audio/asoc/codecs/bolero/bolero-cdc-regmap.o
+  CC      techpack/audio/asoc/codecs/bolero/bolero-cdc-tables.o
+  CC      techpack/audio/asoc/codecs/bolero/bolero-clk-rsc.o
+  CC      techpack/audio/dsp/codecs/audio_utils.o
+../drivers/kernelsu/Makefile:28: "KSU_GIT_VERSION not defined! It is better to make KernelSU a git submodule!"
+-- KernelSU Manager signature size: 0x033b
+-- KernelSU Manager signature hash: c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6
+  CC      techpack/audio/dsp/codecs/audio_native.o
+  CC      techpack/audio/asoc/codecs/bolero/wsa-macro.o
+  CC      techpack/audio/dsp/codecs/aac_in.o
+  CC      techpack/audio/dsp/codecs/amrnb_in.o
+  CC      techpack/audio/asoc/codecs/bolero/va-macro.o
+  CC      techpack/audio/dsp/codecs/amrwb_in.o
+../techpack/audio/dsp/codecs/amrwb_in.c: In function ‘amrwb_in_ioctl’:
+../techpack/audio/dsp/codecs/amrwb_in.c:154:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  154 |                 if (copy_to_user((void *)arg, audio->enc_cfg,
+      |                 ^~
+../techpack/audio/dsp/codecs/amrwb_in.c:158:25: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  158 |                         rc = -EFAULT;
+      |                         ^~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  CC      techpack/audio/dsp/codecs/audio_aac.o
+  CC      techpack/audio/dsp/codecs/audio_alac.o
+  CC      techpack/audio/asoc/codecs/bolero/tx-macro.o
+  CC      techpack/audio/dsp/codecs/audio_amrnb.o
+  CC      techpack/audio/dsp/codecs/audio_amrwb.o
+  CC      techpack/audio/asoc/codecs/bolero/rx-macro.o
+  CC      techpack/audio/dsp/codecs/audio_amrwbplus.o
+  CC      techpack/audio/dsp/codecs/audio_ape.o
+  AR      techpack/audio/asoc/codecs/bolero/built-in.a
+  CC      techpack/audio/dsp/codecs/audio_evrc.o
+  CC      techpack/audio/asoc/codecs/max989xx/max98937.o
+  CC      techpack/audio/dsp/codecs/audio_g711alaw.o
+In file included from ../include/linux/printk.h:7,
+                 from ../include/linux/kernel.h:13,
+                 from ../include/linux/delay.h:22,
+                 from ../techpack/audio/asoc/codecs/max989xx/max98937.c:9:
+../techpack/audio/asoc/codecs/max989xx/max98937.c: In function ‘max98927_spk_mute_ctrl_put’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%s’ expects a matching ‘char *’ argument [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:12:25: note: in expansion of macro ‘KERN_SOH’
+   12 | #define KERN_WARNING    KERN_SOH "4"    /* warning conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:306:16: note: in expansion of macro ‘KERN_WARNING’
+  306 |         printk(KERN_WARNING pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~~~~~
+../include/linux/printk.h:307:17: note: in expansion of macro ‘pr_warning’
+  307 | #define pr_warn pr_warning
+      |                 ^~~~~~~~~~
+../techpack/audio/asoc/codecs/max989xx/max98937.c:3211:25: note: in expansion of macro ‘pr_warn’
+ 3211 |                         pr_warn("%s: speaker muted by normally conduct!\n");
+      |                         ^~~~~~~
+  CC      techpack/audio/dsp/codecs/audio_g711mlaw.o
+  CC      drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.o
+  CC      techpack/audio/dsp/codecs/audio_hwacc_effects.o
+In file included from ../include/linux/printk.h:7,
+                 from ../include/linux/kernel.h:13,
+                 from ../include/linux/list.h:9,
+                 from ../include/linux/wait.h:7,
+                 from ../include/linux/wait_bit.h:8,
+                 from ../include/linux/fs.h:6,
+                 from ../include/linux/debugfs.h:15,
+                 from ../drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c:6:
+../drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c: In function ‘ipa_get_flt_rt_stats’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%d’ expects argument of type ‘int’, but argument 5 has type ‘long unsigned int’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:11:25: note: in expansion of macro ‘KERN_SOH’
+   11 | #define KERN_ERR        KERN_SOH "3"    /* error conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:304:16: note: in expansion of macro ‘KERN_ERR’
+  304 |         printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_i.h:113:17: note: in expansion of macro ‘pr_err’
+  113 |                 pr_err(DRV_NAME " %s:%d " fmt, __func__, __LINE__, ## args);\
+      |                 ^~~~~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c:1405:17: note: in expansion of macro ‘IPAERR’
+ 1405 |                 IPAERR("stats_size %d > ipa_flt_rt_stats %d\n",
+      |                 ^~~~~~
+In file included from ../drivers/platform/msm/ipa/ipa_v3/../ipa_api.h:9,
+                 from ../drivers/platform/msm/ipa/ipa_v3/ipa_i.h:27,
+                 from ../drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c:9:
+../drivers/platform/msm/ipa/ipa_v3/ipa_i.h:41:18: warning: format ‘%d’ expects argument of type ‘int’, but argument 6 has type ‘long unsigned int’ [-Wformat=]
+   41 | #define DRV_NAME "ipa"
+      |                  ^~~~~
+../drivers/platform/msm/ipa/ipa_v3/../ipa_common_i.h:360:47: note: in definition of macro ‘IPA_IPC_LOGGING’
+  360 |                         ipc_log_string((buf), fmt, __func__, __LINE__, \
+      |                                               ^~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_i.h:116:33: note: in expansion of macro ‘DRV_NAME’
+  116 |                                 DRV_NAME " %s:%d " fmt, ## args); \
+      |                                 ^~~~~~~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c:1405:17: note: in expansion of macro ‘IPAERR’
+ 1405 |                 IPAERR("stats_size %d > ipa_flt_rt_stats %d\n",
+      |                 ^~~~~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_i.h:41:18: warning: format ‘%d’ expects argument of type ‘int’, but argument 6 has type ‘long unsigned int’ [-Wformat=]
+   41 | #define DRV_NAME "ipa"
+      |                  ^~~~~
+../drivers/platform/msm/ipa/ipa_v3/../ipa_common_i.h:360:47: note: in definition of macro ‘IPA_IPC_LOGGING’
+  360 |                         ipc_log_string((buf), fmt, __func__, __LINE__, \
+      |                                               ^~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_i.h:118:33: note: in expansion of macro ‘DRV_NAME’
+  118 |                                 DRV_NAME " %s:%d " fmt, ## args); \
+      |                                 ^~~~~~~~
+../drivers/platform/msm/ipa/ipa_v3/ipa_hw_stats.c:1405:17: note: in expansion of macro ‘IPAERR’
+ 1405 |                 IPAERR("stats_size %d > ipa_flt_rt_stats %d\n",
+      |                 ^~~~~~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  CC      techpack/audio/dsp/codecs/audio_mp3.o
+  AR      techpack/audio/asoc/codecs/max989xx/built-in.a
+  CC      techpack/audio/asoc/codecs/tfa98xx-v6/tfa_container_v6.o
+  CC      techpack/audio/dsp/codecs/audio_multi_aac.o
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  AR      drivers/platform/msm/ipa/ipa_v3/built-in.a
+  AR      drivers/platform/msm/ipa/built-in.a
+  CC      techpack/audio/dsp/codecs/audio_qcelp.o
+  AR      drivers/platform/msm/built-in.a
+  AR      drivers/platform/built-in.a
+  CC      techpack/audio/dsp/codecs/audio_wma.o
+  CC      techpack/audio/asoc/codecs/tfa98xx-v6/tfa98xx_v6.o
+  CC      techpack/audio/dsp/codecs/audio_wmapro.o
+  CC      techpack/audio/dsp/codecs/evrc_in.o
+  CC      techpack/audio/dsp/codecs/g711alaw_in.o
+  CC      techpack/audio/dsp/codecs/g711mlaw_in.o
+  CC      techpack/audio/asoc/codecs/tfa98xx-v6/tfa_dsp_v6.o
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_dsp_v6.c:106:5: warning: conflicting types for ‘tfa_irq_clear’ due to enum/integer mismatch; have ‘int(struct tfa_device *, enum tfa9912_irq)’ [-Wenum-int-mismatch]
+  106 | int tfa_irq_clear(struct tfa_device *tfa, enum tfa9912_irq bit)
+      |     ^~~~~~~~~~~~~
+In file included from ../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_service.h:36,
+                 from ../techpack/audio/asoc/codecs/tfa98xx-v6/tfa98xx_parameters.h:22,
+                 from ../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_container.h:17,
+                 from ../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_dsp_v6.c:11:
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_device.h:278:5: note: previous declaration of ‘tfa_irq_clear’ with type ‘int(struct tfa_device *, int)’
+  278 | int tfa_irq_clear(struct tfa_device *tfa, int bit);
+      |     ^~~~~~~~~~~~~
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_dsp_v6.c:126:5: warning: conflicting types for ‘tfa_irq_get’ due to enum/integer mismatch; have ‘int(struct tfa_device *, enum tfa9912_irq)’ [-Wenum-int-mismatch]
+  126 | int tfa_irq_get(struct tfa_device *tfa, enum tfa9912_irq bit)
+      |     ^~~~~~~~~~~
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_device.h:282:5: note: previous declaration of ‘tfa_irq_get’ with type ‘int(struct tfa_device *, int)’
+  282 | int tfa_irq_get(struct tfa_device *tfa, int bit);
+      |     ^~~~~~~~~~~
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_dsp_v6.c:145:5: warning: conflicting types for ‘tfa_irq_ena’ due to enum/integer mismatch; have ‘int(struct tfa_device *, enum tfa9912_irq,  int)’ [-Wenum-int-mismatch]
+  145 | int tfa_irq_ena(struct tfa_device *tfa, enum tfa9912_irq bit, int state)
+      |     ^~~~~~~~~~~
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_device.h:286:5: note: previous declaration of ‘tfa_irq_ena’ with type ‘int(struct tfa_device *, int,  int)’
+  286 | int tfa_irq_ena(struct tfa_device *tfa, int bit, int state);
+      |     ^~~~~~~~~~~
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_dsp_v6.c:207:5: warning: conflicting types for ‘tfa_irq_set_pol’ due to enum/integer mismatch; have ‘int(struct tfa_device *, enum tfa9912_irq,  int)’ [-Wenum-int-mismatch]
+  207 | int tfa_irq_set_pol(struct tfa_device *tfa, enum tfa9912_irq bit, int state)
+      |     ^~~~~~~~~~~~~~~
+../techpack/audio/asoc/codecs/tfa98xx-v6/tfa_device.h:290:5: note: previous declaration of ‘tfa_irq_set_pol’ with type ‘int(struct tfa_device *, int,  int)’
+  290 | int tfa_irq_set_pol(struct tfa_device *tfa, int bit, int state);
+      |     ^~~~~~~~~~~~~~~
+  CC      techpack/audio/dsp/codecs/qcelp_in.o
+  AR      techpack/audio/dsp/codecs/built-in.a
+  CC      techpack/audio/dsp/msm-audio-event-notify.o
+  CC      techpack/audio/dsp/audio_calibration.o
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  CC      techpack/audio/dsp/audio_cal_utils.o
+  CC      techpack/audio/asoc/codecs/tfa98xx-v6/tfa_init_v6.o
+  CC      techpack/audio/asoc/codecs/tfa98xx-v6/../smartpa_pm/smartpa_pm.o
+  CC      techpack/audio/dsp/q6adm.o
+  AR      techpack/audio/asoc/codecs/tfa98xx-v6/built-in.a
+In file included from ../include/linux/printk.h:7,
+                 from ../include/linux/kernel.h:13,
+                 from ../include/linux/list.h:9,
+                 from ../include/linux/module.h:9,
+                 from ../techpack/audio/dsp/q6adm.c:6:
+../techpack/audio/dsp/q6adm.c: In function ‘adm_get_all_mute_pp_param_from_port’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%x’ expects argument of type ‘unsigned int’, but argument 3 has type ‘atomic_t’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:14:25: note: in expansion of macro ‘KERN_SOH’
+   14 | #define KERN_INFO       KERN_SOH "6"    /* informational */
+      |                         ^~~~~~~~
+../include/linux/printk.h:311:16: note: in expansion of macro ‘KERN_INFO’
+  311 |         printk(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~~
+../techpack/audio/dsp/q6adm.c:334:25: note: in expansion of macro ‘pr_info’
+  334 |                         pr_info("%s : COPP: 0x%x\n",__func__, this_adm.copp.app_type[port_idx][idx]);
+      |                         ^~~~~~~
+  CC      techpack/audio/asoc/codecs/wcd938x/wcd938x.o
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  CC      techpack/audio/asoc/codecs/wcd938x/wcd938x-regmap.o
+  CC      techpack/audio/dsp/q6afe.o
+  CC      techpack/audio/asoc/codecs/wcd938x/wcd938x-tables.o
+  CC      techpack/audio/asoc/codecs/wcd938x/wcd938x-mbhc.o
+../techpack/audio/dsp/q6afe.c: In function ‘afe_get_clk_src’:
+../techpack/audio/dsp/q6afe.c:9471:48: warning: the comparison will always evaluate as ‘false’ for the address of ‘clk_src_name’ will never be NULL [-Waddress]
+ 9471 |         if (clkinfo_per_port[idx].clk_src_name == NULL)
+      |                                                ^~
+../techpack/audio/dsp/q6afe.c:336:14: note: ‘clk_src_name’ declared here
+  336 |         char clk_src_name[CLK_SRC_NAME_MAX];
+      |              ^~~~~~~~~~~~
+../techpack/audio/dsp/q6afe.c: In function ‘afe_set_lpass_clock_v2’:
+../techpack/audio/dsp/q6afe.c:9811:26: warning: the comparison will always evaluate as ‘true’ for the address of ‘clk_src_name’ will never be NULL [-Waddress]
+ 9811 |         if (clk_src_name != NULL) {
+      |                          ^~
+../techpack/audio/dsp/q6afe.c:401:13: note: ‘clk_src_name’ declared here
+  401 | static char clk_src_name[CLK_SRC_MAX][CLK_SRC_NAME_MAX];
+      |             ^~~~~~~~~~~~
+../techpack/audio/dsp/q6afe.c:9813:57: warning: the comparison will always evaluate as ‘true’ for the address of ‘clk_src_name’ will never be NULL [-Waddress]
+ 9813 |                         if (clk_src_name[CLK_SRC_FRACT] != NULL)
+      |                                                         ^~
+../techpack/audio/dsp/q6afe.c:401:13: note: ‘clk_src_name’ declared here
+  401 | static char clk_src_name[CLK_SRC_MAX][CLK_SRC_NAME_MAX];
+      |             ^~~~~~~~~~~~
+../techpack/audio/dsp/q6afe.c:9816:59: warning: the comparison will always evaluate as ‘true’ for the address of ‘clk_src_name’ will never be NULL [-Waddress]
+ 9816 |                 } else if (clk_src_name[CLK_SRC_INTEGRAL] != NULL) {
+      |                                                           ^~
+../techpack/audio/dsp/q6afe.c:401:13: note: ‘clk_src_name’ declared here
+  401 | static char clk_src_name[CLK_SRC_MAX][CLK_SRC_NAME_MAX];
+      |             ^~~~~~~~~~~~
+  CC      techpack/audio/asoc/codecs/wcd938x/wcd938x-slave.o
+  AR      techpack/audio/asoc/codecs/wcd938x/built-in.a
+  CC      techpack/audio/asoc/codecs/wsa883x/wsa883x.o
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  CC      techpack/audio/asoc/codecs/wsa883x/wsa883x-regmap.o
+  CC      techpack/audio/dsp/q6asm.o
+  CC      techpack/audio/asoc/codecs/wsa883x/wsa883x-tables.o
+  CC      techpack/audio/asoc/codecs/wsa883x/wsa883x-temp-sensor.o
+  AR      techpack/audio/asoc/codecs/wsa883x/built-in.a
+  CC      techpack/audio/asoc/codecs/wcd9xxx-core-init.o
+  CC      techpack/audio/asoc/codecs/msm-cdc-pinctrl.o
+  CC      techpack/audio/asoc/codecs/msm-cdc-supply.o
+  CC      techpack/audio/asoc/codecs/wcd-irq.o
+  CC      techpack/audio/asoc/codecs/wcd-clsh.o
+  CC      techpack/audio/dsp/q6audio-v2.o
+  CC      techpack/audio/dsp/q6voice.o
+  CC      techpack/audio/asoc/codecs/wcdcal-hwdep.o
+  CC      techpack/audio/asoc/codecs/wcd9xxx-soc-init.o
+  CC      techpack/audio/asoc/codecs/wcd-dsp-utils.o
+  CC      techpack/audio/asoc/codecs/wcd-dsp-mgr.o
+  CC      techpack/audio/asoc/codecs/audio-ext-clk-up.o
+  CC      drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_main.o
+  CC      techpack/audio/asoc/codecs/wsa881x.o
+  CC      techpack/audio/dsp/q6core.o
+  CC      techpack/audio/asoc/codecs/wsa881x-tables.o
+  CC      techpack/audio/asoc/codecs/wsa881x-regmap.o
+  CC      techpack/audio/dsp/q6common.o
+  CC      techpack/audio/asoc/codecs/wsa881x-temp-sensor.o
+  CC      techpack/audio/dsp/rtac.o
+  CC      techpack/audio/asoc/codecs/msm_stub.o
+  CC      techpack/audio/asoc/codecs/wcd-mbhc-v2.o
+  CC      techpack/audio/dsp/q6lsm.o
+  CC      techpack/audio/asoc/codecs/wcd-mbhc-adc.o
+  CC      techpack/audio/dsp/adsp_err.o
+  CC      techpack/audio/dsp/msm_audio_ion.o
+  CC      techpack/audio/asoc/codecs/msm_hdmi_codec_rx.o
+  CC      techpack/audio/dsp/avtimer.o
+  AR      techpack/audio/asoc/codecs/built-in.a
+  CC      techpack/audio/asoc/msm-audio-effects-q6-v2.o
+  CC      techpack/audio/dsp/q6_init.o
+  CC      techpack/audio/dsp/voice_mhi.o
+  CC      techpack/audio/dsp/digital-cdc-rsc-mgr.o
+  CC      techpack/audio/asoc/msm-compress-q6-v2.o
+  CC      techpack/audio/dsp/usf.o
+  CC      techpack/audio/dsp/usfcdev.o
+  CC      techpack/audio/dsp/q6usm.o
+  CC      techpack/audio/asoc/msm-dai-fe.o
+  CC      techpack/audio/asoc/msm-dai-q6-hdmi-v2.o
+  CC      techpack/audio/dsp/adsp-loader.o
+  CC      techpack/audio/asoc/msm-dai-q6-v2.o
+  CC      techpack/audio/dsp/audio_pdr.o
+  CC      techpack/audio/dsp/audio_notifier.o
+  CC      techpack/audio/dsp/audio_ssr.o
+  AR      techpack/audio/dsp/built-in.a
+  CC      techpack/audio/ipc/apr.o
+  CC      techpack/audio/asoc/msm-dai-stub-v2.o
+  CC      techpack/audio/ipc/apr_v2.o
+  CC      techpack/audio/asoc/msm-lsm-client.o
+  CC      techpack/audio/ipc/apr_tal_rpmsg.o
+  UPD     kernel/config_data.h
+  CC      kernel/kheaders.o
+  CC      kernel/configs.o
+  AR      techpack/audio/ipc/built-in.a
+  AR      kernel/built-in.a
+  CC      techpack/audio/asoc/msm-pcm-afe-v2.o
+  CC      techpack/audio/asoc/msm-pcm-dtmf-v2.o
+  CC      techpack/audio/soc/pinctrl-wcd.o
+  CC      techpack/audio/asoc/msm-pcm-hostless.o
+  CC      techpack/audio/soc/pinctrl-lpi.o
+  CC      techpack/audio/asoc/msm-pcm-host-voice-v2.o
+  CC      techpack/audio/soc/regmap-swr.o
+  CC      techpack/audio/soc/soundwire.o
+  CC      techpack/audio/asoc/msm-pcm-loopback-v2.o
+  AR      drivers/staging/qcacld-3.0/built-in.a
+  CC      techpack/audio/soc/snd_event.o
+  CC      techpack/audio/asoc/msm-pcm-q6-noirq.o
+  CC      techpack/audio/soc/swr-mstr-ctrl.o
+  CC      techpack/audio/asoc/msm-pcm-q6-v2.o
+  AR      drivers/staging/built-in.a
+  AR      techpack/audio/soc/built-in.a
+  CC      techpack/audio/asoc/msm-pcm-routing-v2.o
+../techpack/audio/asoc/msm-pcm-routing-v2.c: In function ‘msm_routing_get_adm_topology’:
+../techpack/audio/asoc/msm-pcm-routing-v2.c:1268:22: warning: the comparison will always evaluate as ‘false’ for the address of ‘cal_data’ will never be NULL [-Waddress]
+ 1268 |         if (cal_data == NULL)
+      |                      ^~
+../techpack/audio/asoc/msm-pcm-routing-v2.c:56:30: note: ‘cal_data’ declared here
+   56 | static struct cal_type_data *cal_data[MAX_ROUTING_CAL_TYPES];
+      |                              ^~~~~~~~
+  CC      techpack/audio/asoc/msm-pcm-voice-v2.o
+../techpack/audio/asoc/msm-pcm-routing-v2.c: In function ‘msm_routing_put_stereo_to_custom_stereo_control’:
+../techpack/audio/asoc/msm-pcm-routing-v2.c:23181:33: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+23181 |                                 if (topo_id < 0)
+      |                                 ^~
+In file included from ../include/linux/kernel.h:13,
+                 from ../include/linux/list.h:9,
+                 from ../include/linux/module.h:9,
+                 from ../techpack/audio/asoc/msm-pcm-routing-v2.c:8:
+../include/linux/printk.h:135:1: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  135 | ({                                                      \
+      | ^
+../include/linux/printk.h:342:9: note: in expansion of macro ‘no_printk’
+  342 |         no_printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)
+      |         ^~~~~~~~~
+../techpack/audio/asoc/msm-pcm-routing-v2.c:23184:41: note: in expansion of macro ‘pr_debug’
+23184 |                                         pr_debug("idx %d\n", idx);
+      |                                         ^~~~~~~~
+  AR      drivers/built-in.a
+../techpack/audio/asoc/msm-pcm-routing-v2.c: At top level:
+../techpack/audio/asoc/msm-pcm-routing-v2.c:24413:18: warning: duplicate ‘const’ declaration specifier [-Wduplicate-decl-specifier]
+24413 | static const int const tert_mi2s_rx_vi_fb_tx_value[] = {
+      |                  ^~~~~
+../techpack/audio/asoc/msm-pcm-routing-v2.c:24426:18: warning: duplicate ‘const’ declaration specifier [-Wduplicate-decl-specifier]
+24426 | static const int const pri_tdm_rx_vi_fb_tx_value[] = {
+      |                  ^~~~~
+  CC      techpack/audio/asoc/msm-pcm-voip-v2.o
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  CC      techpack/audio/asoc/msm-transcode-loopback-q6-v2.o
+  CC      techpack/audio/asoc/platform_init.o
+  CC      techpack/audio/asoc/msm-pcm-routing-devdep.o
+  CC      techpack/audio/asoc/msm-qti-pp-config.o
+In file included from ../include/linux/printk.h:7,
+                 from ../include/linux/kernel.h:13,
+                 from ../include/linux/list.h:9,
+                 from ../include/linux/module.h:9,
+                 from ../techpack/audio/asoc/msm-qti-pp-config.c:7:
+../techpack/audio/asoc/msm-qti-pp-config.c: In function ‘mute_detect_result_set’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%d’ expects argument of type ‘int’, but argument 3 has type ‘long int’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:11:25: note: in expansion of macro ‘KERN_SOH’
+   11 | #define KERN_ERR        KERN_SOH "3"    /* error conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:304:16: note: in expansion of macro ‘KERN_ERR’
+  304 |         printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~
+../techpack/audio/asoc/msm-qti-pp-config.c:1603:9: note: in expansion of macro ‘pr_err’
+ 1603 |         pr_err("%s : enter: %d\n",__func__, ucontrol->value.integer.value[0]);
+      |         ^~~~~~
+../techpack/audio/asoc/msm-qti-pp-config.c: In function ‘auddet_ena_set’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%d’ expects argument of type ‘int’, but argument 3 has type ‘long int’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:14:25: note: in expansion of macro ‘KERN_SOH’
+   14 | #define KERN_INFO       KERN_SOH "6"    /* informational */
+      |                         ^~~~~~~~
+../include/linux/printk.h:311:16: note: in expansion of macro ‘KERN_INFO’
+  311 |         printk(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~~
+../techpack/audio/asoc/msm-qti-pp-config.c:1636:9: note: in expansion of macro ‘pr_info’
+ 1636 |         pr_info("%s : enter: %d\n",__func__, ucontrol->value.integer.value[0]);
+      |         ^~~~~~~
+../techpack/audio/asoc/msm-qti-pp-config.c: In function ‘mute_detect_voice_result_set’:
+../include/linux/kern_levels.h:5:25: warning: format ‘%d’ expects argument of type ‘int’, but argument 3 has type ‘long int’ [-Wformat=]
+    5 | #define KERN_SOH        "\001"          /* ASCII Start Of Header */
+      |                         ^~~~~~
+../include/linux/kern_levels.h:11:25: note: in expansion of macro ‘KERN_SOH’
+   11 | #define KERN_ERR        KERN_SOH "3"    /* error conditions */
+      |                         ^~~~~~~~
+../include/linux/printk.h:304:16: note: in expansion of macro ‘KERN_ERR’
+  304 |         printk(KERN_ERR pr_fmt(fmt), ##__VA_ARGS__)
+      |                ^~~~~~~~
+../techpack/audio/asoc/msm-qti-pp-config.c:1701:9: note: in expansion of macro ‘pr_err’
+ 1701 |         pr_err("%s : enter: %d\n",__func__, ucontrol->value.integer.value[0]);
+      |         ^~~~~~
+  CC      techpack/audio/asoc/kona.o
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-field-unsafe’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-default-const-init-var-unsafe’ may have been intended to silence earlier diagnostics
+  AR      techpack/audio/asoc/built-in.a
+  AR      techpack/audio/built-in.a
+  AR      techpack/built-in.a
+  GEN     .version
+  CHK     include/generated/compile.h
+  UPD     include/generated/compile.h
+  CC      init/version.o
+  AR      init/built-in.a
+  AR      built-in.a
+  MODPOST vmlinux.o
+  KSYM    .tmp_kallsyms1.o
+  KSYM    .tmp_kallsyms2.o
+  LD      vmlinux
+  SORTEX  vmlinux
+  SYSMAP  System.map
+find: ‘arch/arm64/boot/dts/’: No such file or directory
+find: ‘arch/arm64/boot/dts/’: No such file or directory
+  OBJCOPY arch/arm64/boot/Image

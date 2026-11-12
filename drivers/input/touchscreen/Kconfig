@@ -1360,7 +1360,6 @@ source "drivers/input/touchscreen/xiaomi/Kconfig"
 source "drivers/input/touchscreen/nt36xxx/Kconfig"
 source "drivers/input/touchscreen/nt36523/Kconfig"
 
-source "drivers/input/touchscreen/goodix/Kconfig"
 source "drivers/input/touchscreen/focaltech_touch/Kconfig"
 
 endif

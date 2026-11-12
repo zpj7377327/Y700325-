@@ -1,2 +1,0 @@
-source "drivers/input/touchscreen/goodix/brl/Kconfig"
-source "drivers/input/touchscreen/goodix/gt738x/Kconfig"

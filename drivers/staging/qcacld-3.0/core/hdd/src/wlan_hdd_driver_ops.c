@@ -535,6 +535,7 @@ static int __hdd_soc_probe(struct device *dev,
 	cds_set_recovery_in_progress(false);
 
 	errno = hdd_init_qdf_ctx(dev, bdev, bus_type, bid);
+	pr_err("Y700 WIFI PROBE: hdd_init_qdf_ctx errno=%d\n", errno);
 	if (errno)
 		goto unlock;
 
@@ -543,19 +544,25 @@ static int __hdd_soc_probe(struct device *dev,
 	hdd_ctx = hdd_context_create(dev);
 	if (IS_ERR(hdd_ctx)) {
 		errno = PTR_ERR(hdd_ctx);
+		pr_err("Y700 WIFI PROBE: hdd_context_create errno=%d\n", errno);
 		goto assert_fail_count;
 	}
+	pr_err("Y700 WIFI PROBE: hdd_context_create ok\n");
 
 	errno = hdd_wlan_startup(hdd_ctx);
+	pr_err("Y700 WIFI PROBE: hdd_wlan_startup errno=%d\n", errno);
 	if (errno)
 		goto hdd_context_destroy;
 
 	status = hdd_psoc_create_vdevs(hdd_ctx);
+	pr_err("Y700 WIFI PROBE: hdd_psoc_create_vdevs status=%d\n", status);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		errno = qdf_status_to_os_return(status);
+		pr_err("Y700 WIFI PROBE: hdd_psoc_create_vdevs errno=%d\n", errno);
 		goto wlan_exit;
 	}
 
+	pr_err("Y700 WIFI PROBE: probe success\n");
 	probe_fail_cnt = 0;
 	cds_set_driver_loaded(true);
 	cds_set_load_in_progress(false);

@@ -3772,8 +3772,10 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 				   HIF_ENABLE_TYPE_PROBE);
 		if (ret) {
 			hdd_err("Failed to open hif; errno: %d", ret);
+			pr_err("Y700 WIFI PROBE: hdd_hif_open failed ret=%d\n", ret);
 			goto power_down;
 		}
+		pr_err("Y700 WIFI PROBE: hdd_hif_open ok\n");
 
 		hif_ctx = cds_get_context(QDF_MODULE_ID_HIF);
 		if (!hif_ctx) {
@@ -3816,6 +3818,7 @@ int hdd_wlan_start_modules(struct hdd_context *hdd_ctx, bool reinit)
 		hdd_update_cds_ac_specs_params(hdd_ctx);
 
 		status = hdd_component_psoc_open(hdd_ctx->psoc);
+		pr_err("Y700 WIFI PROBE: hdd_component_psoc_open status=%d\n", status);
 		if (QDF_IS_STATUS_ERROR(status)) {
 			hdd_err("Failed to Open legacy components; status: %d",
 				status);
@@ -11819,7 +11822,9 @@ struct hdd_context *hdd_context_create(struct device *dev)
 		goto err_free_hdd_context;
 	}
 
+	pr_err("Y700 WIFI PROBE: cfg_parse start file=%s\n", WLAN_INI_FILE);
 	status = cfg_parse(WLAN_INI_FILE);
+	pr_err("Y700 WIFI PROBE: cfg_parse done status=%d\n", status);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		hdd_err("Failed to parse cfg %s; status:%d\n",
 			WLAN_INI_FILE, status);
@@ -11838,6 +11843,7 @@ struct hdd_context *hdd_context_create(struct device *dev)
 
 
 	ret = hdd_objmgr_create_and_store_psoc(hdd_ctx, DEFAULT_PSOC_ID);
+	pr_err("Y700 WIFI PROBE: psoc create ret=%d\n", ret);
 	if (ret) {
 		QDF_DEBUG_PANIC("Psoc creation fails!");
 		goto err_release_store;
@@ -11857,6 +11863,7 @@ struct hdd_context *hdd_context_create(struct device *dev)
 	hdd_override_ini_config(hdd_ctx);
 
 	ret = hdd_context_init(hdd_ctx);
+	pr_err("Y700 WIFI PROBE: hdd_context_init ret=%d\n", ret);
 
 	if (ret)
 		goto err_hdd_objmgr_destroy;
@@ -11867,6 +11874,7 @@ struct hdd_context *hdd_context_create(struct device *dev)
 
 	cds_set_multicast_logging(hdd_ctx->config->multicast_host_fw_msgs);
 	ret = hdd_init_netlink_services(hdd_ctx);
+	pr_err("Y700 WIFI PROBE: netlink ret=%d\n", ret);
 	if (ret)
 		goto err_deinit_hdd_context;
 

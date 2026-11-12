@@ -11,11 +11,30 @@
 #include <linux/of_irq.h>
 #include <linux/of.h>
 #include <linux/pm_wakeup.h>
+#include <linux/ktime.h>
 
 #define PROC_AWAKE_ID 12 /* 12th bit */
 #define AWAKE_BIT BIT(PROC_AWAKE_ID)
 static struct qcom_smem_state *state;
 static struct wakeup_source *notify_ws;
+
+/*
+ * Y700 SLPI handshake debounce (IRQ 412 standby drain):
+ * The SLPI toggles the sleep-state signal ~2.5 Hz during screen-off
+ * (IRQ 427), and each toggle took a full 200 ms __pm_wakeup_event hold,
+ * so the APSS was held awake ~50% of the time and could never stay
+ * suspended. No sensor is streaming during screen-off, so this is the
+ * APSS<->SLPI sleep-state handshake itself flapping, not sensor data.
+ * Coalesce rapid toggles: only take a wakeup hold if at least
+ * Y700_SLPI_DEBOUNCE_MS have passed since the last one. Genuine SLPI
+ * signals still wake the APSS through the smp2p wakeup IRQ (IRQ 412),
+ * so this only drops redundant "stay awake" holds, not wakeups.
+ */
+#define Y700_SLPI_DEBOUNCE_MS	1000
+#define Y700_SLPI_LOG_EVERY	100
+static ktime_t y700_slpi_last_hold;
+static unsigned int y700_slpi_total;
+static unsigned int y700_slpi_debounced;
 
 /**
  * sleepstate_pm_notifier() - PM notifier callback function.
@@ -49,7 +68,22 @@ static struct notifier_block sleepstate_pm_nb = {
 
 static irqreturn_t smp2p_sleepstate_handler(int irq, void *ctxt)
 {
-	__pm_wakeup_event(notify_ws, 200);
+	ktime_t now = ktime_get();
+	s64 delta_ms;
+
+	y700_slpi_total++;
+	delta_ms = ktime_ms_delta(now, y700_slpi_last_hold);
+	if (delta_ms >= Y700_SLPI_DEBOUNCE_MS) {
+		__pm_wakeup_event(notify_ws, 200);
+		y700_slpi_last_hold = now;
+	} else {
+		y700_slpi_debounced++;
+	}
+
+	if (y700_slpi_total % Y700_SLPI_LOG_EVERY == 0)
+		pr_info("Y700 SLPI: sleepstate events=%u debounced=%u (window %d ms)\n",
+			y700_slpi_total, y700_slpi_debounced,
+			Y700_SLPI_DEBOUNCE_MS);
 	return IRQ_HANDLED;
 }
 
@@ -92,6 +126,8 @@ static int smp2p_sleepstate_probe(struct platform_device *pdev)
 		dev_err(dev, "fail to register smp2p threaded_irq=%d\n", irq);
 		goto err;
 	}
+	pr_info("Y700 SLPI: sleepstate debounce enabled (window %d ms, irq %d)\n",
+		Y700_SLPI_DEBOUNCE_MS, irq);
 	return 0;
 err:
 	wakeup_source_unregister(notify_ws);

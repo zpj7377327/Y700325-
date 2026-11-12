@@ -404,6 +404,10 @@ struct aw8697 {
     struct timed_output_dev to_dev;
 #else
     struct led_classdev cdev;
+    /* Y700 v6m: second LED node "vibrator_r" forwarding to this instance.
+     * Stock names the motors "vibrator" + "vibrator_r"; the HAL gates on
+     * both nodes existing. The v6l mirror drives both motors physically. */
+    struct led_classdev cdev_r;
 #endif
     struct fileops fileops;
     struct ram ram;

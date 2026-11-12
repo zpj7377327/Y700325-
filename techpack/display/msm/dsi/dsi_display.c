@@ -4894,6 +4894,8 @@ static int dsi_display_dynamic_clk_configure_cmd(struct dsi_display *display,
 	return rc;
 }
 
+
+
 static int dsi_display_dfps_update(struct dsi_display *display,
 				   struct dsi_display_mode *dsi_mode)
 {
@@ -4949,6 +4951,15 @@ static int dsi_display_dfps_update(struct dsi_display *display,
 			goto error;
 		}
 	}
+
+	/* Y700 DFPS diagnostic: host timing programmed. dmesg timestamps
+	 * on this line vs the kickoff FPS send line show whether the panel
+	 * and host switches land on the same frame or one frame apart. */
+	if (display->panel->cur_mode &&
+	    display->panel->cur_mode->timing.refresh_rate != timing->refresh_rate)
+		pr_info("Y700 DFPS: host timing programmed for %u Hz (was %u Hz)\n",
+			timing->refresh_rate,
+			display->panel->cur_mode->timing.refresh_rate);
 
 	panel_mode = display->panel->cur_mode;
 	memcpy(panel_mode, dsi_mode, sizeof(*panel_mode));
@@ -7403,6 +7414,52 @@ int dsi_display_set_mode(struct dsi_display *display,
 		DSI_ERR("[%s] mode cannot be set\n", display->name);
 		goto error;
 	}
+
+#ifdef OPLUS_BUG_STABILITY
+	/*
+	 * Y700: block refresh-rate decreases while the screen is dimming
+	 * (auto screen-off). During dimming the framework drops 120->60 Hz
+	 * and the panel flashes one frame. Keep 120 Hz while dimming and
+	 * let the brightness fall linearly; the rate is restored/changed
+	 * only when the user explicitly switches it at normal brightness.
+	 * Return 0 (success, no change) so the caller does not retry.
+	 */
+	if (display->panel && display->panel->name &&
+	    !strcmp(display->panel->name, "nt36523 lcd vid mode dsi panel") &&
+	    display->panel->cur_mode &&
+	    display->panel->bl_config.y700_dimming &&
+	    adj_mode.timing.refresh_rate <
+	    display->panel->cur_mode->timing.refresh_rate) {
+		pr_info("Y700 DFPS: block %u->%u Hz while dimming\n",
+			display->panel->cur_mode->timing.refresh_rate,
+			adj_mode.timing.refresh_rate);
+		rc = 0;
+		goto error;
+	}
+	/*
+	 * Y700: global refresh-rate lock (v5w). The user sets 120 or 60 Hz
+	 * in Settings and it must stay fixed at that rate — no automatic
+	 * idle drop (120->60, flashes) and no automatic touch boost
+	 * (60->120). Only a full modeset (manual Settings switch, which
+	 * blanks the display briefly — accepted) may change the rate.
+	 * A seamless (DSI_MODE_FLAG_SEAMLESS) rate change is an automatic
+	 * one (idle drop / touch boost), so block it. Return 0 (success,
+	 * no change) so the caller does not retry.
+	 */
+	if (display->panel && display->panel->name &&
+	    !strcmp(display->panel->name, "nt36523 lcd vid mode dsi panel") &&
+	    display->panel->cur_mode &&
+	    (adj_mode.dsi_mode_flags & DSI_MODE_FLAG_SEAMLESS) &&
+	    adj_mode.timing.refresh_rate !=
+	    display->panel->cur_mode->timing.refresh_rate) {
+		pr_info("Y700 DFPS: block seamless %u->%u Hz (locked to %u Hz)\n",
+			display->panel->cur_mode->timing.refresh_rate,
+			adj_mode.timing.refresh_rate,
+			display->panel->cur_mode->timing.refresh_rate);
+		rc = 0;
+		goto error;
+	}
+#endif /* OPLUS_BUG_STABILITY */
 
 	rc = dsi_display_set_mode_sub(display, &adj_mode, flags);
 	if (rc) {

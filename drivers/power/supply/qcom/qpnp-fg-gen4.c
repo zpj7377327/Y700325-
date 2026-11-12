@@ -258,6 +258,7 @@ struct fg_dt_props {
 	int	delta_esr_thr_uohms;
 	int	rconn_uohms;
 	int	batt_id_pullup_kohms;
+	int	parallel_cells;
 	int	batt_temp_cold_thresh;
 	int	batt_temp_hot_thresh;
 	int	batt_temp_hyst;
@@ -2551,6 +2552,90 @@ static void fg_gen4_post_profile_load(struct fg_gen4_chip *chip)
 
 }
 
+/*
+ * Y700 dual-cell (2P) NOM_CAP fix.
+ *
+ * The Y700 pack is two cells in parallel (2P, ~6550 mAh total), but the
+ * FG hardware derives NOM_CAP (SRAM word 271) from Lenovo's per-cell
+ * profile blob (3600 mAh nominal), so the design capacity reports one
+ * cell (~3588 mAh) and SoC falls ~2x too fast. There is no slave FG and
+ * no capacity-doubling logic in this driver.
+ *
+ * This overrides NOM_CAP in SRAM with the parallel total
+ * (NOM_CAP * parallel_cells) after the profile-load step. It runs
+ * unconditionally (not only when the profile is reloaded) because the
+ * driver normally skips reloading when the SRAM profile already matches
+ * the DT blob (force_load_profile is not set).
+ *
+ * Guard: only scale when the current NOM_CAP looks like a per-cell
+ * value (< FG_PARALLEL_NOM_CAP_THRESHOLD_MAH). This makes the override
+ * idempotent: if NOM_CAP was already scaled on a previous boot (SRAM
+ * retained across a warm reboot), it is left alone instead of being
+ * doubled again.
+ *
+ * When the override is applied, the SDAM learned capacity is also reset
+ * to the corrected nominal via fg_gen4_store_learned_capacity() so
+ * capacity learning re-converges from the pack total instead of the
+ * old (wrong, per-cell) learned value.
+ */
+#define FG_PARALLEL_NOM_CAP_THRESHOLD_MAH	5000
+
+static void fg_gen4_apply_parallel_nom_cap(struct fg_gen4_chip *chip)
+{
+	struct fg_dev *fg = &chip->fg;
+	int rc, nom_cap_mah, scaled_mah;
+	u8 buf[2];
+	int64_t scaled_uah;
+
+	if (chip->dt.parallel_cells <= 1)
+		return;
+
+	rc = fg_sram_read(fg, NOM_CAP_WORD, NOM_CAP_OFFSET, buf, 2,
+			FG_IMA_DEFAULT);
+	if (rc < 0) {
+		pr_err("Y700 FG: error reading NOM_CAP rc=%d\n", rc);
+		return;
+	}
+
+	nom_cap_mah = buf[0] | (buf[1] << 8);
+	if (nom_cap_mah <= 0) {
+		pr_err("Y700 FG: invalid NOM_CAP %d mAh\n", nom_cap_mah);
+		return;
+	}
+
+	/* Already a pack total (scaled on a previous boot)? Leave it. */
+	if (nom_cap_mah >= FG_PARALLEL_NOM_CAP_THRESHOLD_MAH) {
+		pr_info("Y700 FG: NOM_CAP already %d mAh (pack total), skip scaling\n",
+			nom_cap_mah);
+		return;
+	}
+
+	scaled_mah = nom_cap_mah * chip->dt.parallel_cells;
+	buf[0] = scaled_mah & 0xff;
+	buf[1] = (scaled_mah >> 8) & 0xff;
+	rc = fg_sram_write(fg, NOM_CAP_WORD, NOM_CAP_OFFSET, buf, 2,
+			FG_IMA_DEFAULT);
+	if (rc < 0) {
+		pr_err("Y700 FG: error writing NOM_CAP rc=%d\n", rc);
+		return;
+	}
+
+	pr_info("Y700 FG: NOM_CAP %d mAh x %d parallel cells = %d mAh (2P pack)\n",
+		nom_cap_mah, chip->dt.parallel_cells, scaled_mah);
+
+	/* Reset learned capacity to the corrected nominal so cap learning
+	 * re-converges from the pack total instead of the old per-cell
+	 * learned value. */
+	scaled_uah = (int64_t)scaled_mah * 1000;
+	rc = fg_gen4_store_learned_capacity(chip, scaled_uah);
+	if (rc < 0)
+		pr_err("Y700 FG: error resetting learned capacity rc=%d\n",
+			rc);
+	else
+		pr_info("Y700 FG: learned capacity reset to %d mAh\n",
+			scaled_mah);
+}
+
 static void profile_load_work(struct work_struct *work)
 {
 	struct fg_dev *fg = container_of(work,
@@ -2634,6 +2719,10 @@ static void profile_load_work(struct work_struct *work)
 		}
 	}
 done:
+	/* Y700 2P pack: scale per-cell NOM_CAP to the parallel total.
+	 * Unconditional (runs even when the profile was not reloaded). */
+	fg_gen4_apply_parallel_nom_cap(chip);
+
 	rc = fg_sram_read(fg, PROFILE_INTEGRITY_WORD,
 			PROFILE_INTEGRITY_OFFSET, &val, 1, FG_IMA_DEFAULT);
 	if (!rc && (val & FIRST_PROFILE_LOAD_BIT)) {
@@ -6150,6 +6239,17 @@ static int fg_gen4_parse_dt(struct fg_gen4_chip *chip)
 
 	chip->dt.force_load_profile = of_property_read_bool(node,
 					"qcom,fg-force-load-profile");
+
+	/*
+	 * Y700 2P pack: parallel-cell count for the NOM_CAP fix.
+	 * The stock dtbo carries no qcom,parallel-cells property, so
+	 * default to 2 (two parallel cells, ~6550 mAh pack). If the DT
+	 * property is present it takes precedence.
+	 */
+	chip->dt.parallel_cells = 2;
+	rc = of_property_read_u32(node, "qcom,parallel-cells", &temp);
+	if (!rc && temp > 0)
+		chip->dt.parallel_cells = temp;
 
 	fg_gen4_parse_cl_params_dt(chip);
 	fg_gen4_parse_batt_temp_dt(chip);

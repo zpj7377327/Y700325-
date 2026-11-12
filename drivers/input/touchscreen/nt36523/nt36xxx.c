@@ -1692,14 +1692,12 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 			NVT_ERR("Dump FW history:\n");
 			nvt_dump_fw_history();
 		}
-		if (nvt_get_dbgfw_status()) {
-			if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-				NVT_ERR("use built-in fw");
-				nvt_update_firmware(ts->fw_name);
-			}
-		} else {
-			nvt_update_firmware(ts->fw_name);
-		}
+		/* Y700 DFPS fix: a firmware-only reload was proven insufficient
+		 * after 120->60 (fw_ver 0x21 yet next packet still bad), so
+		 * queue the full suspend+resume cycle instead of reloading
+		 * here. queue_work coalesces repeats while a cycle is pending. */
+		NVT_ERR("Y700 DFPS recovery: queue suspend+resume cycle\n");
+		queue_work(ts->event_wq, &ts->recovery_work);
 		goto XFER_ERROR;
 	}
 #endif /* #if NVT_TOUCH_WDT_RECOVERY */
@@ -2641,6 +2639,27 @@ static void nvt_resume_work(struct work_struct *work)
 	nvt_ts_resume(&ts_core->client->dev);
 }
 
+/* Y700 DFPS recovery cycle (2026-11-05): after a 120->60 refresh switch the
+ * IC emits FD garbage and a firmware-only reload does NOT restore touch
+ * (fw_ver returns 0x21, next packet is still bad); only the screen off/on
+ * path does, because it adds a deep-sleep suspend before the reload.
+ * This work reproduces exactly that path. It must run on event_wq, not in
+ * the IRQ thread: suspend/resume take ts->lock, which the IRQ handler
+ * already holds when WDT recovery triggers, so a queued work waits for
+ * the handler to release the lock and then cycles safely. */
+static void nvt_recovery_cycle_work(struct work_struct *work)
+{
+	struct nvt_ts_data *ts_core = container_of(work, struct nvt_ts_data, recovery_work);
+	if (!bTouchIsAwake) {
+		NVT_LOG("Y700 DFPS recovery: skip, touch already suspended\n");
+		return;
+	}
+	NVT_LOG("Y700 DFPS recovery: suspend+resume cycle start\n");
+	nvt_ts_suspend(&ts_core->client->dev);
+	nvt_ts_resume(&ts_core->client->dev);
+	NVT_LOG("Y700 DFPS recovery: suspend+resume cycle end\n");
+}
+
 static int nvt_pinctrl_init(struct nvt_ts_data *nvt_data)
 {
 	int retval = 0;
@@ -3091,6 +3110,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		goto err_alloc_work_thread_failed;
 	}
 	INIT_WORK(&ts->resume_work, nvt_resume_work);
+	INIT_WORK(&ts->recovery_work, nvt_recovery_cycle_work);
 	/*INIT_WORK(&ts->suspend_work, nvt_suspend_work);*/
 
 	ts->set_touchfeature_wq = create_singlethread_workqueue("nvt-set-touchfeature-queue");

@@ -251,7 +251,9 @@ static void dsi_bridge_enable(struct drm_bridge *bridge)
 		return;
 	}
 	#ifdef OPLUS_BUG_STABILITY
-	if (c_bridge->display->panel->nt36523w_ktz8866) {
+	if (c_bridge->display->panel->nt36523w_ktz8866 ||
+	    !strcmp(c_bridge->display->panel->name,
+		    "nt36523 lcd vid mode dsi panel")) {
 		if (c_bridge->display->panel->panel_initialized) {
 			if (c_bridge->display->panel->cur_mode->timing.refresh_rate == 60
 					&& old_refresh_rate != c_bridge->display->panel->cur_mode->timing.refresh_rate) {
@@ -1019,6 +1021,183 @@ void dsi_conn_enable_event(struct drm_connector *connector,
 			event_idx, &event_info, enable);
 }
 
+#ifdef OPLUS_BUG_STABILITY
+/*
+ * Y700: direction-aware FPS send (v5z-dd).
+ *
+ * The panel FPS register takes effect immediately, but the host VFP
+ * (programmed into the timing-DB shadow by dsi_display_dfps_update)
+ * only loads at a later vsync. Sending the FPS command in kickoff
+ * (v5x) tears one frame on the drop; delaying it one frame (v5z)
+ * merely moves the flash; waiting for panel TE (v5z-te) still left
+ * a ~26 ms skew because MDP vsync and panel TE are two different
+ * domains. Sending at the timing-DB load (v5z-db) fixed the drop
+ * but not the rise: on the rise the host and panel switched at the
+ * same instant, so the host sent 8.33 ms frames while the panel
+ * was still receiving the FPS command and expecting 16.67 ms.
+ *
+ * The rise and the drop need OPPOSITE orders (confirmed by dmesg:
+ * on v5z-db the FPS and the host timing switched at the same
+ * instant in both directions, yet the rise still tore):
+ *  - DROP (120 -> 60): host first. The FPS command is sent in
+ *    dsi_conn_post_kickoff, right after the timing-DB load, so the
+ *    panel switches at the same instant as the host.
+ *  - RISE (60 -> 120): panel first. The FPS command is sent HERE,
+ *    in kickoff (arm()), before the host timing loads, giving the
+ *    panel a head start on the faster frame rate.
+ * dsi_conn_post_kickoff runs in the crtc_commit thread (process
+ * context; dsi_ctrl_timing_db_update already sleeps inside it), so
+ * taking panel_lock and issuing the DSI command is safe there; the
+ * kickoff send reuses the same path v5x/v5z-db's fallback already
+ * used, and the panel is never left without the FPS command
+ * (touch dies without it).
+ *
+ * State: kickoff (sde_encoder.c) calls dsi_display_y700_db_fps_arm()
+ * on every frame with the current rate. A rise is sent immediately
+ * in arm(); a drop is recorded as pending and
+ * dsi_display_y700_db_fps_on_db_load() sends it after the VRR
+ * timing-DB updates. If the post-kickoff send fails (or no VRR DB
+ * load happens, e.g. a non-VRR modeset), the next kickoff sends
+ * the pending drop instead once the DB has loaded, or after 2
+ * kickoffs at the latest. If the rate returns to the old value
+ * while a drop is still pending, the pending send is dropped as
+ * stale. CONFIRMED on device 2026-11-07: no flash in either
+ * direction, touch still works across switches.
+ */
+static u32 y700_db_old_fps;
+static u32 y700_db_pending_fps;
+static bool y700_db_pending;
+static bool y700_db_loaded;
+static u32 y700_db_arm_kickoffs;
+
+#define Y700_DB_FPS_MAX_ARMS 2
+
+static int y700_db_fps_send(struct dsi_display *display, u32 fps)
+{
+	if (!display || !display->panel ||
+	    !display->panel->panel_initialized ||
+	    !(display->panel->nt36523w_ktz8866 ||
+	      !strcmp(display->panel->name,
+		      "nt36523 lcd vid mode dsi panel")) ||
+	    !display->panel->cur_mode)
+		return -ENODEV;
+
+	if (fps == 120)
+		return dsi_panel_fps120_cmd_set(display->panel);
+	if (fps == 60)
+		return dsi_panel_fps60_cmd_set(display->panel);
+	return -EINVAL;
+}
+
+void dsi_display_y700_db_fps_arm(struct dsi_display *display, u32 fps)
+{
+	int rc;
+
+	if (!display)
+		return;
+
+	if (y700_db_old_fps == 0) {
+		y700_db_old_fps = fps;
+		return;
+	}
+
+	if (fps == y700_db_old_fps) {
+		/*
+		 * Rate is back where it started: a pending DB-load send
+		 * for a drop that never happened is stale -- drop it so
+		 * the panel is never sent an FPS for a rate we left.
+		 */
+		if (y700_db_pending) {
+			pr_info("Y700 DFPS: db-load fps cmd dropped, rate back to %u Hz (pending %u Hz dropped)\n",
+				fps, y700_db_pending_fps);
+			y700_db_pending = false;
+		}
+		return;
+	}
+
+	/* Rate changed. */
+	if (fps > y700_db_old_fps) {
+		/*
+		 * RISE (60 -> 120): panel first. The panel needs a head
+		 * start on the faster frame rate: if the host switches
+		 * to 8.33 ms frames first, the panel is still expecting
+		 * 16.67 ms while it receives the FPS command -> tear.
+		 * So send the FPS command HERE, in kickoff, before the
+		 * host timing loads. A pending drop is superseded.
+		 */
+		if (y700_db_pending)
+			y700_db_pending = false;
+		rc = y700_db_fps_send(display, fps);
+		pr_info("Y700 DFPS: kickoff fps cmd (rise) for %u Hz, rc=%d (old_fps=%u)\n",
+			fps, rc, y700_db_old_fps);
+		if (rc == 0)
+			y700_db_old_fps = fps;
+		/* On failure leave old_fps; the next kickoff retries. */
+		return;
+	}
+
+	/* DROP (120 -> 60): host first. Arm for the DB-load send in
+	 * dsi_conn_post_kickoff; the panel switches at the same
+	 * instant as the host timing.
+	 */
+	if (y700_db_pending) {
+		if (fps == y700_db_pending_fps)
+			return;
+		if (y700_db_loaded ||
+		    y700_db_arm_kickoffs >= Y700_DB_FPS_MAX_ARMS) {
+			/*
+			 * DB already loaded (the post-kickoff send failed
+			 * or was missed) or no DB load happened within 2
+			 * kickoffs (non-VRR modeset) -- send now in kickoff
+			 * so the panel is not left without the FPS command.
+			 */
+			rc = y700_db_fps_send(display, y700_db_pending_fps);
+			pr_info("Y700 DFPS: post-db fps cmd for %u Hz, rc=%d (old_fps=%u)%s\n",
+				y700_db_pending_fps, rc, y700_db_old_fps,
+				y700_db_loaded ? "" : " (timeout, no DB load)");
+			if (rc == 0) {
+				y700_db_old_fps = y700_db_pending_fps;
+				y700_db_pending = false;
+			}
+			/* On failure leave pending; the next kickoff retries. */
+		} else {
+			y700_db_pending_fps = fps;
+			y700_db_arm_kickoffs++;
+			pr_info("Y700 DFPS: db-load fps cmd updated to %u Hz (old_fps=%u, still pending)\n",
+				fps, y700_db_old_fps);
+		}
+		return;
+	}
+
+	y700_db_pending_fps = fps;
+	y700_db_pending = true;
+	y700_db_loaded = false;
+	y700_db_arm_kickoffs = 0;
+	pr_info("Y700 DFPS: db-load fps cmd armed for %u Hz (old_fps=%u)\n",
+		fps, y700_db_old_fps);
+}
+
+void dsi_display_y700_db_fps_on_db_load(struct dsi_display *display)
+{
+	int rc;
+
+	y700_db_loaded = true;
+
+	if (!y700_db_pending)
+		return;
+
+	rc = y700_db_fps_send(display, y700_db_pending_fps);
+	pr_info("Y700 DFPS: db-load fps cmd for %u Hz, rc=%d (old_fps=%u)\n",
+		y700_db_pending_fps, rc, y700_db_old_fps);
+	if (rc == 0) {
+		y700_db_old_fps = y700_db_pending_fps;
+		y700_db_pending = false;
+	}
+	/* On failure leave pending; the kickoff fallback (db_loaded)
+	 * retries on the next frame. */
+}
+#endif /* OPLUS_BUG_STABILITY */
+
 int dsi_conn_post_kickoff(struct drm_connector *connector,
 	struct msm_display_conn_params *params)
 {
@@ -1067,6 +1246,15 @@ int dsi_conn_post_kickoff(struct drm_connector *connector,
 				return -EINVAL;
 			}
 		}
+
+#ifdef OPLUS_BUG_STABILITY
+		/*
+		 * Y700: send the pending FPS command now -- the host timing
+		 * has just loaded from the timing-DB shadow, so the panel
+		 * switches at the same instant as the host (v5z-db).
+		 */
+		dsi_display_y700_db_fps_on_db_load(display);
+#endif
 
 		c_bridge->dsi_mode.dsi_mode_flags &= ~DSI_MODE_FLAG_VRR;
 	}

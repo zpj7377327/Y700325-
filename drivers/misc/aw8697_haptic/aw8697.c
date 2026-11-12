@@ -6627,6 +6627,11 @@ static char aw8697_rtp_name_0619_174Hz[][AW8697_RTP_NAME_MAX] = {
 #endif
 
 struct aw8697_container *aw8697_rtp = NULL;
+
+/* Y700 v6l: i2c_client of the left motor (7-005b). Single-instance
+ * driver: the right motor's probe finds it and every write is
+ * mirrored to it. NULL = mirror off. */
+static struct i2c_client *aw8697_slave;
 struct aw8697 *g_aw8697;
 #define  AW8697_CONTAINER_DEFAULT_SIZE  (2 * 1024 * 1024)   ////  2M
 int aw8697_container_size = AW8697_CONTAINER_DEFAULT_SIZE;
@@ -6694,6 +6699,11 @@ static int aw8697_i2c_write(struct aw8697 *aw8697,
         msleep(AW_I2C_RETRY_DELAY);
     }
 
+    /* Y700 v6l: mirror the write to the left (slave) motor,
+     * best-effort, no retry. */
+    if (ret >= 0 && aw8697_slave)
+        i2c_smbus_write_byte_data(aw8697_slave, reg_addr, reg_data);
+
     return ret;
 }
 
@@ -6750,6 +6760,11 @@ static int aw8697_i2c_writes(struct aw8697 *aw8697,
     if (ret < 0) {
         pr_err("%s: i2c master send error\n", __func__);
     }
+
+    /* Y700 v6l: mirror the same block (reg_addr + payload) to the
+     * slave, best-effort. */
+    if (ret >= 0 && aw8697_slave)
+        i2c_master_send(aw8697_slave, data, len+1);
 
     kfree(data);
 
@@ -9796,6 +9811,24 @@ static void aw8697_haptic_audio_work_routine(struct work_struct *work)
 }
 
 //hch 20190917
+/* Y700 v6n: resolve the aw8697 instance from either LED node.
+ * The primary node ("vibrator") embeds member cdev, the second node
+ * ("vibrator_r") embeds member cdev_r; container_of() on the wrong
+ * member would compute a wrong pointer, so pick by the LED device
+ * name (set from cdev->name at registration, stable afterwards).
+ * The v6m cdev_r brightness handlers already use container_of(cdev_r);
+ * this helper lets the whole vibrator attribute group work on both
+ * nodes, so the HAL / AAC RichTap sees activate/duration/state/index
+ * on vibrator_r too. */
+static inline struct aw8697 *aw8697_from_led_dev(struct device *dev)
+{
+    struct led_classdev *cdev = dev_get_drvdata(dev);
+
+    if (!strcmp(dev_name(dev), "vibrator_r"))
+        return container_of(cdev, struct aw8697, cdev_r);
+    return container_of(cdev, struct aw8697, cdev);
+}
+
 static ssize_t aw8697_gun_type_show(struct device *dev,
         struct device_attribute *attr, char *buf)
 {
@@ -9803,8 +9836,7 @@ static ssize_t aw8697_gun_type_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     return snprintf(buf, PAGE_SIZE, "0x%02x\n", aw8697->gun_type);
 }
@@ -9816,8 +9848,7 @@ static ssize_t aw8697_gun_type_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -9842,8 +9873,7 @@ static ssize_t aw8697_bullet_nr_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     return snprintf(buf, PAGE_SIZE, "0x%02x\n", aw8697->bullet_nr);
 }
@@ -9855,8 +9885,7 @@ static ssize_t aw8697_bullet_nr_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -9881,8 +9910,7 @@ static ssize_t aw8697_gun_mode_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     return snprintf(buf, PAGE_SIZE, "0x%02x\n", aw8697->gun_mode);
 }
@@ -9893,8 +9921,7 @@ static ssize_t aw8697_gun_mode_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -10277,6 +10304,11 @@ static int aw8697_haptic_f0_calibration(struct aw8697 *aw8697)
     if(aw8697_haptic_get_f0(aw8697)) {
         pr_err("%s get f0 error, user defafult f0\n", __func__);
     }
+
+    /* v6o Y700: stock haptic_hv reports lra_f0 = 1754 for this motor,
+     * but this tree BEMF calibration measures 1792, driving waveforms
+     * off-resonance (audible beep, no tactile feedback). Trust stock. */
+    aw8697->f0 = 1754;
 
     /* restore default work mode */
     aw8697_haptic_play_mode(aw8697, AW8697_HAPTIC_STANDBY_MODE);
@@ -10681,7 +10713,8 @@ static int init_vibrator_proc(struct aw8697 *aw8697)
 	struct proc_dir_entry *prEntry_da = NULL;
 	struct proc_dir_entry *prEntry_tmp = NULL;
 
-	prEntry_da = proc_mkdir("vibrator", NULL);
+	/* Y700 v6g: proc dir by I2C addr (2nd motor would collide on "vibrator") */
+	prEntry_da = proc_mkdir((aw8697->i2c->addr == 0x5B) ? "vibrator_l" : "vibrator", NULL);
 	if (prEntry_da == NULL) {
 		ret = -ENOMEM;
 		dev_err(aw8697->dev, "%s: Couldn't create vibrator proc entry\n",
@@ -10727,7 +10760,10 @@ static int aw8697_haptic_init(struct aw8697 *aw8697)
     pr_info("%s enter\n", __func__);
 
     ret = misc_register(&aw8697_haptic_misc);
-    if(ret) {
+    if(ret == -EBUSY) {
+        /* Y700: 2nd motor shares the misc device; non-fatal. */
+        dev_info(aw8697->dev, "%s: misc busy (2nd motor), continue\n", __func__);
+    } else if(ret) {
         dev_err(aw8697->dev,  "%s: misc fail: %d\n", __func__, ret);
         return ret;
     }
@@ -10741,14 +10777,13 @@ static int aw8697_haptic_init(struct aw8697 *aw8697)
     aw8697->haptic_audio.timer.function = aw8697_haptic_audio_timer_func;
     INIT_WORK(&aw8697->haptic_audio.work, aw8697_haptic_audio_work_routine);
 
-    mutex_init(&aw8697->haptic_audio.lock);
+    /* mutexes already inited in probe (v6f) */
     aw8697->gun_type = 0xff;
     aw8697->bullet_nr = 0x00;
     aw8697->gun_mode = 0x00;
 	aw8697->rtp_routine_on = 0; /*default rtp on is init to 0*/
     aw8697_op_clean_status(aw8697);
-     mutex_init(&aw8697->rtp_lock);
-	mutex_init(&aw8697->qos_lock);
+    /* mutexes already inited in probe (v6f) */
     /* haptic init */
     mutex_lock(&aw8697->lock);
 
@@ -10757,6 +10792,10 @@ static int aw8697_haptic_init(struct aw8697 *aw8697)
 
     ret = aw8697_i2c_read(aw8697, AW8697_REG_WAVSEQ1, &reg_val);
     aw8697->index = reg_val & 0x7F;
+    /* v6o Y700: stock default waveform index = 1; the chip powers up
+     * with 9 in WAVSEQ1. Program the sequencer to 1 to match stock. */
+    aw8697->index = 1;
+    aw8697_haptic_set_repeat_wav_seq(aw8697, aw8697->index);
     ret = aw8697_i2c_read(aw8697, AW8697_REG_DATDBG, &reg_val);
     aw8697->gain = reg_val & 0xFF;
     ret = aw8697_i2c_read(aw8697, AW8697_REG_BSTDBG4, &reg_val);
@@ -10924,6 +10963,26 @@ static void aw8697_haptic_brightness_set(struct led_classdev *cdev,
     mutex_unlock(&aw8697->lock);
 
 }
+
+/* Y700 v6m: "vibrator_r" forwards to the same instance (see cdev_r).
+ * Stock names the motors "vibrator" + "vibrator_r"; the HAL gates on
+ * both nodes existing. The v6l mirror already drives both motors. */
+static enum led_brightness aw8697_haptic_brightness_get_r(struct led_classdev *cdev)
+{
+    struct aw8697 *aw8697 =
+        container_of(cdev, struct aw8697, cdev_r);
+
+    return aw8697_haptic_brightness_get(&aw8697->cdev);
+}
+
+static void aw8697_haptic_brightness_set_r(struct led_classdev *cdev,
+                enum led_brightness level)
+{
+    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev_r);
+
+    aw8697_haptic_brightness_set(&aw8697->cdev, level);
+}
+
 #endif
 
 static ssize_t aw8697_state_show(struct device *dev,
@@ -10933,8 +10992,7 @@ static ssize_t aw8697_state_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     return snprintf(buf, PAGE_SIZE, "%d\n", aw8697->state);
@@ -10953,8 +11011,7 @@ static ssize_t aw8697_duration_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ktime_t time_rem;
     s64 time_ms = 0;
@@ -10974,8 +11031,7 @@ static ssize_t aw8697_duration_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11008,8 +11064,7 @@ static ssize_t aw8697_activate_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     /* For now nothing to show */
@@ -11047,8 +11102,7 @@ static ssize_t aw8697_activate_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 	unsigned int val = 0;
 	int rc = 0;
@@ -11106,6 +11160,7 @@ static ssize_t aw8697_activate_store(struct device *dev,
         if (aw8697->device_id == 815 || aw8697->device_id == 9595)
 #endif
             aw8697_haptic_set_gain(aw8697, aw8697->gain);
+        /* Y700 v6r: reverted v6q; restore v6p behaviour (SINE_CYCLE 9). v6q tested worse than v6p. */
         aw8697_haptic_set_repeat_wav_seq(aw8697, AW8697_WAVEFORM_INDEX_SINE_CYCLE);
 
         mutex_unlock(&aw8697->lock);
@@ -11171,8 +11226,7 @@ static ssize_t aw8697_activate_mode_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     return snprintf(buf, PAGE_SIZE, "activate_mode=%d\n", aw8697->activate_mode);
@@ -11185,8 +11239,7 @@ static ssize_t aw8697_activate_mode_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11208,8 +11261,7 @@ static ssize_t aw8697_index_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned char reg_val = 0;
     aw8697_i2c_read(aw8697, AW8697_REG_WAVSEQ1, &reg_val);
@@ -11225,8 +11277,7 @@ static ssize_t aw8697_index_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11251,8 +11302,7 @@ static ssize_t aw8697_vmax_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     return snprintf(buf, PAGE_SIZE, "0x%02x\n", aw8697->vmax);
@@ -11334,8 +11384,7 @@ static ssize_t aw8697_vmax_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11395,8 +11444,7 @@ static ssize_t aw8697_gain_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     return snprintf(buf, PAGE_SIZE, "0x%02x\n", aw8697->gain);
@@ -11409,8 +11457,7 @@ static ssize_t aw8697_gain_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11435,8 +11482,7 @@ static ssize_t aw8697_seq_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     size_t count = 0;
     unsigned char i = 0;
@@ -11458,8 +11504,7 @@ static ssize_t aw8697_seq_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[2] = {0, 0};
 
@@ -11481,8 +11526,7 @@ static ssize_t aw8697_loop_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     size_t count = 0;
     unsigned char i = 0;
@@ -11510,8 +11554,7 @@ static ssize_t aw8697_loop_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[2] = {0, 0};
     unsigned int val = 0;
@@ -11543,8 +11586,7 @@ static ssize_t aw8697_rtp_num_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     unsigned char i = 0;
@@ -11562,8 +11604,7 @@ static ssize_t aw8697_rtp_num_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     /*datebuf[0] is connect number */
     /*databuf[1]- databuf[x] is sequence and number*/
@@ -11595,8 +11636,7 @@ static ssize_t aw8697_reg_show(struct device *dev, struct device_attribute *attr
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     unsigned char i = 0;
@@ -11617,8 +11657,7 @@ static ssize_t aw8697_reg_store(struct device *dev, struct device_attribute *att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[2] = {0, 0};
 
@@ -11636,8 +11675,7 @@ static ssize_t aw8697_rtp_show(struct device *dev, struct device_attribute *attr
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "rtp play: %d\n", aw8697->rtp_cnt);
@@ -11652,8 +11690,7 @@ static ssize_t aw8697_rtp_store(struct device *dev, struct device_attribute *att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11796,8 +11833,7 @@ static ssize_t aw8697_ram_update_store(struct device *dev, struct device_attribu
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11819,8 +11855,7 @@ static ssize_t aw8697_f0_show(struct device *dev, struct device_attribute *attr,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
 
@@ -11844,8 +11879,7 @@ static ssize_t aw8697_f0_store(struct device *dev, struct device_attribute *attr
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11904,8 +11938,7 @@ static ssize_t aw8697_cali_show(struct device *dev, struct device_attribute *att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     mutex_lock(&aw8697->lock);
@@ -11923,8 +11956,7 @@ static ssize_t aw8697_cali_store(struct device *dev, struct device_attribute *at
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -11948,8 +11980,7 @@ static ssize_t aw8697_cali_store(struct device *dev, struct device_attribute *at
 static ssize_t aw8697_short_check_show(struct device *dev, struct device_attribute *attr,
         char *buf)
 {
-	struct led_classdev *cdev = dev_get_drvdata(dev);
-	struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+	struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 	ssize_t len = 0;
 	int rc = 0;
 	bool short_circuit = 0;
@@ -12028,8 +12059,7 @@ static ssize_t aw8697_cont_show(struct device *dev, struct device_attribute *att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     aw8697_haptic_read_cont_f0(aw8697);
@@ -12044,8 +12074,7 @@ static ssize_t aw8697_cont_store(struct device *dev, struct device_attribute *at
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -12070,8 +12099,7 @@ static ssize_t aw8697_cont_td_show(struct device *dev, struct device_attribute *
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "aw8697 cont delay time = 0x%04x\n", aw8697->cont_td);
@@ -12085,8 +12113,7 @@ static ssize_t aw8697_cont_td_store(struct device *dev, struct device_attribute 
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[1] = {0};
     if(1 == sscanf(buf, "%x", &databuf[0])) {
@@ -12104,8 +12131,7 @@ static ssize_t aw8697_cont_drv_show(struct device *dev, struct device_attribute 
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "aw8697 cont drv level = %d\n", aw8697->cont_drv_lvl);
@@ -12120,8 +12146,7 @@ static ssize_t aw8697_cont_drv_store(struct device *dev, struct device_attribute
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[2] = {0, 0};
     if(2 == sscanf(buf, "%d %d", &databuf[0], &databuf[1])) {
@@ -12140,8 +12165,7 @@ static ssize_t aw8697_cont_num_brk_show(struct device *dev, struct device_attrib
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "aw8697 cont break num = %d\n", aw8697->cont_num_brk);
@@ -12155,8 +12179,7 @@ static ssize_t aw8697_cont_num_brk_store(struct device *dev, struct device_attri
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[1] = {0};
     if(1 == sscanf(buf, "%d", &databuf[0])) {
@@ -12177,8 +12200,7 @@ static ssize_t aw8697_cont_zc_thr_show(struct device *dev, struct device_attribu
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "aw8697 cont zero cross thr = 0x%04x\n", aw8697->cont_zc_thr);
@@ -12192,8 +12214,7 @@ static ssize_t aw8697_cont_zc_thr_store(struct device *dev, struct device_attrib
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[1] = {0};
     if(1 == sscanf(buf, "%x", &databuf[0])) {
@@ -12211,8 +12232,7 @@ static ssize_t aw8697_vbat_monitor_show(struct device *dev, struct device_attrib
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
 
@@ -12238,8 +12258,7 @@ static ssize_t aw8697_lra_resistance_show(struct device *dev, struct device_attr
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     unsigned char reg_val = 0;
@@ -12298,8 +12317,7 @@ static ssize_t aw8697_auto_boost_show(struct device *dev, struct device_attribut
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
 
@@ -12316,8 +12334,7 @@ static ssize_t aw8697_auto_boost_store(struct device *dev, struct device_attribu
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -12341,8 +12358,7 @@ static ssize_t aw8697_prctmode_show(struct device *dev, struct device_attribute 
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     unsigned char reg_val = 0;
@@ -12361,8 +12377,7 @@ static ssize_t aw8697_prctmode_store(struct device *dev, struct device_attribute
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
     #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
     #endif
     unsigned int databuf[2] = {0, 0};
     unsigned int addr=0;
@@ -12384,8 +12399,7 @@ static ssize_t aw8697_trig_show(struct device *dev, struct device_attribute *att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     unsigned char i = 0;
@@ -12406,8 +12420,7 @@ static ssize_t aw8697_trig_store(struct device *dev, struct device_attribute *at
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
     #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
     #endif
     unsigned int databuf[6] = {0};
     if(sscanf(buf, "%d %d %d %d %d %d",
@@ -12440,8 +12453,7 @@ static ssize_t aw8697_ram_vbat_comp_show(struct device *dev, struct device_attri
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
 
@@ -12458,8 +12470,7 @@ static ssize_t aw8697_ram_vbat_comp_store(struct device *dev, struct device_attr
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -12487,8 +12498,7 @@ static ssize_t aw8697_f0_data_show(struct device *dev, struct device_attribute *
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
 
@@ -12574,8 +12584,7 @@ static ssize_t aw8697_f0_data_store(struct device *dev, struct device_attribute 
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
     int rc = 0;
@@ -12604,8 +12613,7 @@ static ssize_t aw8697_rtp_going_show(struct device *dev, struct device_attribute
 	struct timed_output_dev *to_dev = dev_get_drvdata(dev);
 	struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-	struct led_classdev *cdev = dev_get_drvdata(dev);
-	struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+	struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 	ssize_t len = 0;
 	int val = -1;
@@ -12628,8 +12636,7 @@ static ssize_t aw8697_osc_cali_show(struct device *dev, struct device_attribute 
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
 #ifdef CONFIG_OPLUS_HAPTIC_OOS
@@ -12648,8 +12655,7 @@ static ssize_t aw8697_osc_cali_store(struct device *dev, struct device_attribute
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int val = 0;
 
@@ -12681,8 +12687,7 @@ static ssize_t aw8697_haptic_audio_show(struct device *dev, struct device_attrib
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "%d\n", aw8697->haptic_audio.ctr.cnt);
@@ -12697,8 +12702,7 @@ static ssize_t aw8697_haptic_audio_store(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[6] = { 0 };
     struct haptic_ctr *hap_ctr = NULL;
@@ -12772,8 +12776,7 @@ static ssize_t aw8697_haptic_audio_time_show(struct device *dev, struct device_a
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     len += snprintf(buf+len, PAGE_SIZE-len, "haptic_audio.delay_val=%dus\n", aw8697->haptic_audio.delay_val);
@@ -12788,8 +12791,7 @@ static ssize_t aw8697_haptic_audio_time_store(struct device *dev, struct device_
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[2] = {0};
 
@@ -12901,8 +12903,7 @@ static ssize_t aw8697_motor_old_test_store(struct device *dev, struct device_att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     unsigned int databuf[1] = {0};
@@ -12937,8 +12938,7 @@ static ssize_t aw8697_waveform_index_store(struct device *dev, struct device_att
 	struct timed_output_dev *to_dev = dev_get_drvdata(dev);
 	struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-	struct led_classdev *cdev = dev_get_drvdata(dev);
-	struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+	struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 	unsigned int databuf[1] = {0};
 
@@ -12969,8 +12969,7 @@ static ssize_t aw8697_osc_data_show(struct device *dev, struct device_attribute 
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     unsigned char lra_rtim_code = 0;
@@ -12994,8 +12993,7 @@ static ssize_t aw8697_osc_data_store(struct device *dev, struct device_attribute
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     unsigned int databuf[1] = {0};
     //unsigned int lra_rtim_code = 0;
@@ -13018,8 +13016,7 @@ static ssize_t aw8697_haptic_ram_test_show(struct device *dev, struct device_att
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     ssize_t len = 0;
     unsigned int ram_test_result = 0;
@@ -13042,8 +13039,7 @@ static ssize_t aw8697_haptic_ram_test_store(struct device *dev, struct device_at
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
     struct aw8697_container *aw8697_ramtest;
     int i ,j= 0;
@@ -13157,8 +13153,7 @@ static ssize_t aw8697_device_id_show(struct device *dev,
     struct timed_output_dev *to_dev = dev_get_drvdata(dev);
     struct aw8697 *aw8697 = container_of(to_dev, struct aw8697, to_dev);
 #else
-    struct led_classdev *cdev = dev_get_drvdata(dev);
-    struct aw8697 *aw8697 = container_of(cdev, struct aw8697, cdev);
+    struct aw8697 *aw8697 = aw8697_from_led_dev(dev);
 #endif
 
     return snprintf(buf, PAGE_SIZE, "%d\n", aw8697->device_id);
@@ -13334,7 +13329,8 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
     pr_info("%s enter\n", __func__);
 
 #ifdef TIMED_OUTPUT
-    aw8697->to_dev.name = "vibrator";
+    /* Y700 v6g: name by I2C addr (0x5A right "vibrator", 0x5B left "vibrator_l") */
+    aw8697->to_dev.name = (aw8697->i2c->addr == 0x5B) ? "vibrator_l" : "vibrator";
     aw8697->to_dev.get_time = aw8697_vibrator_get_time;
     aw8697->to_dev.enable = aw8697_vibrator_enable;
 
@@ -13350,7 +13346,7 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
         return ret;
     }
 #else
-    aw8697->cdev.name = "vibrator";
+    aw8697->cdev.name = (aw8697->i2c->addr == 0x5B) ? "vibrator_l" : "vibrator";
     aw8697->cdev.brightness_get = aw8697_haptic_brightness_get;
     aw8697->cdev.brightness_set = aw8697_haptic_brightness_set;
 
@@ -13365,6 +13361,31 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
         dev_err(aw8697->dev, "%s error creating sysfs attr files\n", __func__);
         return ret;
      }
+
+    /* Y700 v6m/v6n: second LED node "vibrator_r" (stock name)
+     * forwarding to this same instance. Best-effort: if it fails, the
+     * primary still works. v6n attaches the vibrator attribute group
+     * below; the group's handlers resolve via aw8697_from_led_dev(),
+     * which uses container_of(cdev_r) for this node. */
+    aw8697->cdev_r.name = "vibrator_r";
+    aw8697->cdev_r.brightness_get = aw8697_haptic_brightness_get_r;
+    aw8697->cdev_r.brightness_set = aw8697_haptic_brightness_set_r;
+    ret = devm_led_classdev_register(&aw8697->i2c->dev, &aw8697->cdev_r);
+    if (ret < 0) {
+        dev_warn(aw8697->dev, "%s: fail to create vibrator_r led dev (non-fatal)\n",
+                 __func__);
+    } else {
+        /* Y700 v6n: attach the same vibrator attribute group to
+         * "vibrator_r". The group's handlers now resolve via
+         * aw8697_from_led_dev(), which uses container_of(cdev_r) for
+         * this node, so activate/duration/state/index/gain/rtp etc.
+         * are all visible on vibrator_r. Best-effort. */
+        ret = sysfs_create_group(&aw8697->cdev_r.dev->kobj,
+                     &aw8697_vibrator_attribute_group);
+        if (ret < 0)
+            dev_warn(aw8697->dev, "%s: fail to create vibrator_r sysfs attrs (non-fatal)\n",
+                     __func__);
+    }
 #endif
     hrtimer_init(&aw8697->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
     aw8697->timer.function = aw8697_vibrator_timer_func;
@@ -13375,7 +13396,7 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
 
     INIT_WORK(&aw8697->rtp_single_cycle_work, aw8697_rtp_single_cycle_routine);
     INIT_WORK(&aw8697->rtp_regroup_work, aw8697_rtp_regroup_routine);
-    mutex_init(&aw8697->lock);
+    /* mutex already inited in probe (v6f) */
 
     return 0;
 }
@@ -13752,6 +13773,12 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
 
     pr_info("%s enter\n", __func__);
 
+    /* Y700 v6l: no second driver instance at all. The left motor
+     * (0x5B) is driven by mirroring writes from the right motor's
+     * single instance (aw8697_slave, see below). */
+    if (i2c->addr == 0x5B)
+        return -ENODEV;
+
     AW8697_HAPTIC_RAM_VBAT_COMP_GAIN = 0x80;
 
     if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_I2C)) {
@@ -13767,6 +13794,15 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
     aw8697->i2c = i2c;
 
     i2c_set_clientdata(i2c, aw8697);
+
+    /* Y700 v6f/v6j: init ALL mutexes here, before any IRQ can fire.
+     * IRQ is requested later in probe but can fire before the
+     * mutex_inits in vibrator_init/haptic_init ran, deadlocking
+     * the IRQ thread on a zeroed (locked-looking) mutex. */
+    mutex_init(&aw8697->lock);
+    mutex_init(&aw8697->rtp_lock);
+    mutex_init(&aw8697->qos_lock);
+    mutex_init(&aw8697->haptic_audio.lock);
 
     /* aw8697 rst & int */
     if (np) {
@@ -13812,7 +13848,14 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
     if (gpio_is_valid(aw8697->reset_gpio)) {
         ret = devm_gpio_request_one(&i2c->dev, aw8697->reset_gpio,
             GPIOF_OUT_INIT_LOW, "aw8697_rst");
-        if (ret){
+        if (ret == -EBUSY) {
+            /* Y700: reset GPIO 61 is shared by both motors; the
+             * first probe already claimed it. Treat as shared,
+             * skip hw_reset for this instance. */
+            dev_info(&i2c->dev, "%s: reset gpio %d busy (shared), skip hw_reset\n",
+                     __func__, aw8697->reset_gpio);
+            aw8697->reset_gpio = -1;
+        } else if (ret){
             dev_err(&i2c->dev, "%s: rst request failed\n", __func__);
             goto err_reset_gpio_request;
         }
@@ -13828,10 +13871,46 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
     }
 
     /* aw8697 chip id */
-    ret = aw8697_read_chipid(aw8697);
-    if (ret < 0) {
-        dev_err(&i2c->dev, "%s: aw8697_read_chipid failed ret=%d\n", __func__, ret);
-        goto err_id;
+    /* Y700 v6j bisection: skip chipid read for the 2nd motor (0x5B).
+     * If the boot hang disappears, read_chipid (or the I2C state
+     * after the shared-reset pulse) is the hang trigger. */
+    if (i2c->addr == 0x5B) {
+        dev_info(&i2c->dev, "%s: v6j diag: skip read_chipid for 2nd motor\n", __func__);
+    } else {
+        ret = aw8697_read_chipid(aw8697);
+        if (ret < 0) {
+            dev_err(&i2c->dev, "%s: aw8697_read_chipid failed ret=%d\n", __func__, ret);
+            goto err_id;
+        }
+    }
+
+    /* Y700 v6l: find the left motor's i2c_client for write mirroring.
+     * Runs only for the right motor (0x5A); the left motor never
+     * probes (returns -ENODEV above). */
+    if (i2c->addr == 0x5A) {
+        struct device_node *sn;
+        struct i2c_client *sl;
+        int id_ret;
+
+        sn = of_find_compatible_node(NULL, NULL, "awinic,haptic_hv_l");
+        if (!sn) {
+            dev_info(&i2c->dev, "%s: v6l: no slave node, mirror off\n", __func__);
+        } else {
+            sl = of_find_i2c_device_by_node(sn);
+            of_node_put(sn);
+            if (!sl) {
+                dev_warn(&i2c->dev, "%s: v6l: slave client not found, mirror off\n", __func__);
+            } else {
+                id_ret = i2c_smbus_read_byte_data(sl, AW8697_REG_ID);
+                if (id_ret == AW8697_CHIPID) {
+                    aw8697_slave = sl;
+                    dev_info(&i2c->dev, "%s: v6l: slave mirror ON (7-005b id 0x97)\n", __func__);
+                } else {
+                    dev_warn(&i2c->dev, "%s: v6l: slave id 0x%x, mirror off\n", __func__, id_ret);
+                    put_device(&sl->dev);
+                }
+            }
+        }
     }
 
 // add by huangtongfeng for vmalloc mem
@@ -14001,6 +14080,11 @@ MODULE_DEVICE_TABLE(i2c, aw8697_i2c_id);
 
 static struct of_device_id aw8697_dt_match[] = {
     { .compatible = "awinic,aw8697_haptic" },
+    /* Y700: stock dtbo nodes are awinic,haptic_hv_r (0x5A) and
+     * awinic,haptic_hv_l (0x5B); the chip is AW8697 (0x97), so the
+     * AW8697 driver (not the AW8692x haptic_hv driver) must bind. */
+    { .compatible = "awinic,haptic_hv_r" },
+    { .compatible = "awinic,haptic_hv_l" },
     { },
 };
 

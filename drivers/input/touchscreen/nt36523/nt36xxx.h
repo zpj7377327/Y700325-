@@ -227,6 +227,7 @@ struct nvt_ts_data {
 	struct workqueue_struct *event_wq;
 	struct work_struct suspend_work;
 	struct work_struct resume_work;
+	struct work_struct recovery_work;
 #ifndef NVT_SAVE_TESTDATA_IN_FILE
 	void *testdata;
 #endif

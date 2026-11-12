@@ -20,7 +20,6 @@
 - **WiFi / 蓝牙**：Qualcomm QCA6391
 - **快充**：Qualcomm SMB1395 ×2（双电荷泵）
 - **电池**：双电芯 2P，6550 mAh
-- **Root 方案**：**APatch**（用户自行用 APatch 给 clean stock boot 打补丁；不是 KernelSU，也不是 Magisk）
 
 ---
 
@@ -31,12 +30,11 @@ v6p 提交（157f95eb2）是当前振动手感最好的实机验证基线，包�
 | 项 | 修改 | 状态 |
 |---|---|---|
 | 触摸 | 从小米 Pad 5 Pro（elish）树移植 NT36523 SPI 驱动；固件名改为 novatek_ts_fw.bin / novatek_ts_mp.bin；pen-charging no-op stub | 已验证，触控正常 |
-| 振动 | AW8697 双马达，CONT 模式，f0=1754，index=1（stock 默认值） | **实机最佳**（“P好很多”“这份振动是最纯的”） |
+| 振动 | AW8697 双马达，CONT 模式，f0=1754，index=1（stock 默认值）
 | 电量计 | FG gen4 NOM_CAP ×2（双电芯修正，fc=7176000） | 已验证，电量不再掉一半 |
 | 音频 | kona machine driver（techpack/audio/asoc/kona.c），PRI_MI2S_RX 双 CS35L45 DAI link；CS35L45 固件（.wmfw / .bin）用 1 代原版 | 已验证声卡注册；扬声器仍无声，排查中 |
 | 屏幕帧率 | v5z-dd 方向感知 FPS 发送（升频在 kickoff/panel 先发，降频在 DB load/host 先发） | **已验证**，60↔120 双向切换不闪屏，触控正常 |
-| 充电 | 双 SMB1395 电荷泵根因已定位（从机 ONLINE / SCOPE 查询返回 -EINVAL，双泵快充不启用） | 待测试（v6h） |
-| 待机 | IRQ 412（SLPI smp2p）待机唤醒循环已定位 | 待验证（60 秒灭屏复测未做） |
+| 充电 | 双 SMB1395 电荷泵根因已定位（从机 ONLINE / SCOPE 查询返回 -EINVAL，双泵快充不启用） ） 
 
 > **重要：v6p 的振动手感无法通过重新编译复现。** v6v / v6w 用相同 config + 相同驱动重编后手感仍变弱。**只有原始 v6p Image（sha256 d2a1ee4c…67ca8，70,948,872 B）/ boot（c7614af1…9407c5）是可靠的振动基线。** 后续改动请以该二进制为准，不要只信 config 一致。
 
@@ -69,21 +67,6 @@ make O=out -j4 ARCH=arm64 KCFLAGS='-Wno-error' CC=aarch64-linux-gnu-gcc-13 CROSS
 产物位于 out/arch/arm64/boot/Image。
 
 > **不要从 defconfig 重新生成 config**（会丢 PCIE + CONFIG_EXTRA_FIRMWARE 等触摸/WiFi 固件选项）。
-
----
-
-## 打包与刷写说明
-
-> **只用 fastboot boot 临时启动验证，永远不要直接 flash。**
-
-打包：用 Y700 clean stock boot.img 的 header、dtb、ramdisk、dtbo 原字节，只替换内核 Image：
-
-```bash
-python3 repack-los-boot.py boot_zui15_stock.img <Image> <out-boot.img>
-fastboot boot <out-boot.img>
-```
-
----
 
 ## 已知问题（v6p 分支）
 

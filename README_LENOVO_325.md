@@ -9,7 +9,7 @@
 | 项 | 文件 | 接线 |
 |---|---|---|
 | defconfig | `arch/arm64/configs/vendor/j716f_defconfig` | 无需 |
-| 触摸 GT738x | `drivers/input/touchscreen/goodix/`（含 brl/、gt738x/） | touchscreen Kconfig source + Makefile obj（GOODIX_BRL / GOODIX_GT738X） |
+| 触摸 NT36523 SPI | `drivers/input/touchscreen/nt36xxx/`（elish 移植，Novatek NT36523 SPI 总线） | touchscreen Kconfig source + Makefile obj |
 | USB redriver | `drivers/usb/misc/pi2dpx1217.c` | usb/misc Kconfig `USB_REDRIVER_PI2DPX`（depends USB_PHY）+ Makefile |
 | 霍尔传感器 | `drivers/input/hall_sensor.c` | input Kconfig `SENSORS_HALL` + Makefile |
 | 音频 codec | `sound/soc/codecs/as33970/`、`dbmdx/`、`es7210_adc.c` | codecs Kconfig（dbmdx source、AS33970、ES7210）+ Makefile（es7210 objs、as33970 obj） |

@@ -100,14 +100,18 @@ static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long e
 static void nvt_ts_early_suspend(struct early_suspend *h);
 static void nvt_ts_late_resume(struct early_suspend *h);
 #endif
-/* Y700 port stubs: no Xiaomi display driver provides lockdown info or
- * panel double-click control in this tree. Returning -ENODEV makes the
+/* Y700 port stub: no Xiaomi display driver provides lockdown info in
+ * this tree. Returning -ENODEV makes the
  * panel-type match fall back to the default firmware names
- * (novatek_ts_fw.bin / novatek_ts_mp.bin, which are the Y700 vendor files),
- * and double-click wakeup via the panel is simply unavailable in this build.
+ * (novatek_ts_fw.bin / novatek_ts_mp.bin, which are the Y700 vendor files).
+ * NT36523 touch IC detects double-tap itself. On suspend the driver sends
+ * HOST_CMD 0x13 (wakeup gesture mode) + enable_irq_wake when db_wakeup is
+ * set, the IC raises the IRQ on double-tap, and the driver reports
+ * KEY_WAKEUP. No panel-side command is needed, so the Xiaomi panel hook
+ * is bypassed by the driver's own suspend gesture path. See
+ * nvt_set_gesture_mode() and the suspend path.
  */
 int dsi_panel_lockdown_info_read(unsigned char *plockdowninfo) { (void)plockdowninfo; return -ENODEV; }
-void dsi_panel_doubleclick_enable(bool on) { (void)on; }
 uint32_t ENG_RST_ADDR  = 0x7FFF80;
 uint32_t SWRST_N8_ADDR = 0; //read from dtsi
 uint32_t SPI_RD_FAST_ADDR = 0;	//read from dtsi
@@ -2235,7 +2239,6 @@ static void nvt_set_gesture_mode()
 		NVT_LOG("Panel off, don't set dbclick gesture flag util panel on");
 		ts->db_wakeup = 0;
 	} else  if (ts->ic_state >= NVT_IC_RESUME_IN){
-		dsi_panel_doubleclick_enable(!!ts->db_wakeup);
 	}
 }
 
@@ -2763,6 +2766,51 @@ static const struct file_operations nvt_tp_control_fops = {
 	.write = nvt_tp_control_write,
 };
 
+/* Y700 v6y: /proc/nvt_double_tap + /proc/touchpanel/double_tap_enable - DT2W switch (0/1).
+ * 13.1 framework never calls the Xiaomi touch interface, so this proc
+ * node is the usable switch. Write 1 to enable (sets db_wakeup bit0,
+ * same as Xiaomi Touch_Doubletap_Mode enable, incl. pen wake bit1),
+ * 0 to disable. Read returns current state. Default is ON (bit0 set
+ * at probe) so double-tap wake works out of the box.
+ */
+static ssize_t nvt_double_tap_read(struct file *file, char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char kbuf[4];
+	int len = snprintf(kbuf, sizeof(kbuf), "%d\n", !!(ts->db_wakeup & 0x01));
+	return simple_read_from_buffer(buf, count, ppos, kbuf, len);
+}
+
+static ssize_t nvt_double_tap_write(struct file *file, const char __user *buf,
+		size_t count, loff_t *ppos)
+{
+	char cmd[8];
+	size_t len = count < sizeof(cmd) - 1 ? count : sizeof(cmd) - 1;
+	if (copy_from_user(cmd, buf, len))
+		return -EFAULT;
+	cmd[len] = '\0';
+	if (cmd[0] == '1') {
+		ts->db_wakeup |= 0x01;
+		ts->db_wakeup |= 0x02; /* pen wake up, same as Xiaomi enable */
+		nvt_set_gesture_mode();
+		NVT_LOG("proc nvt_double_tap: ENABLE\n");
+	} else if (cmd[0] == '0') {
+		ts->db_wakeup &= ~0x01;
+		ts->db_wakeup &= ~0x02;
+		nvt_set_gesture_mode();
+		NVT_LOG("proc nvt_double_tap: DISABLE\n");
+	} else {
+		NVT_ERR("proc nvt_double_tap: unknown cmd %s\n", cmd);
+	}
+	return count;
+}
+
+static const struct file_operations nvt_double_tap_fops = {
+	.owner = THIS_MODULE,
+	.read = nvt_double_tap_read,
+	.write = nvt_double_tap_write,
+};
+
 static int32_t nvt_ts_probe(struct spi_device *client)
 {
 	int32_t ret = 0;
@@ -2898,7 +2946,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	ts->input_dev->evbit[0] = BIT_MASK(EV_SYN) | BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
 	ts->input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 	ts->input_dev->propbit[0] = BIT(INPUT_PROP_DIRECT);
-	ts->db_wakeup = 0;
+	ts->db_wakeup = 0x01; /* Y700 v6y: double-tap wake defaults ON (bit0). 13.1 framework never calls the Xiaomi touch interface to enable it, so default it on. Toggle via /proc/nvt_double_tap. */
 	ts->fw_ver = 0;
 	ts->x_num = 32;
 	ts->y_num = 50;
@@ -3167,6 +3215,15 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 #endif
 	/* Y700 v3: always-on proc trigger, independent of debugfs */
 	proc_create("nvt_tp_control", 0666, NULL, &nvt_tp_control_fops);
+	proc_create("nvt_double_tap", 0666, NULL, &nvt_double_tap_fops);
+	/* Y700 v6y: Oplus-convention alias /proc/touchpanel/double_tap_enable
+	 * (same fops as /proc/nvt_double_tap) so the ColorOS 13.1 framework /
+	 * vendor service can write the double-tap switch at its usual path. */
+	{
+		struct proc_dir_entry *tp_dir = proc_mkdir("touchpanel", NULL);
+		if (tp_dir)
+			proc_create("double_tap_enable", 0666, tp_dir, &nvt_double_tap_fops);
+	}
 
 	bTouchIsAwake = 1;
 	NVT_LOG("end\n");
@@ -3567,7 +3624,6 @@ static int32_t nvt_ts_resume(struct device *dev)
 
 	disable_pen_input_device(false);
 
-	dsi_panel_doubleclick_enable(!!ts->db_wakeup);/*if true, dbclick work until next suspend*/
 	if (likely(ts->ic_state == NVT_IC_RESUME_IN)) {
 		ts->ic_state = NVT_IC_RESUME_OUT;
 	} else {
@@ -3577,7 +3633,6 @@ static int32_t nvt_ts_resume(struct device *dev)
 		ts->db_wakeup = ts->gesture_command_delayed;
 		ts->gesture_command_delayed = -1;
 		NVT_LOG("execute delayed command, set double click wakeup %d\n", ts->db_wakeup);
-		dsi_panel_doubleclick_enable(!!ts->db_wakeup);
 	}
 	queue_work(ts->event_wq, &ts->power_supply_work);
 #ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE

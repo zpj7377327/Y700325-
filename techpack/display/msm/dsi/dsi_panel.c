@@ -81,6 +81,12 @@ extern int last_fps;
 extern volatile bool panel_initialized_flag;
 #endif /*OPLUS_BUG_STABILITY*/
 
+/* Y700 Fix C: Novatek touch wakeup-gesture state (nt36xxx.c). The Oplus
+ * tp_gesture_enable_flag() always returns 0 here, so ask the Novatek
+ * driver as well -- when double-tap wake is on, the touch IC must stay
+ * powered or it can never raise the wake IRQ. */
+extern int nvt_db_wakeup_enabled(void);
+
 __attribute__((weak)) void lcd_queue_load_tp_fw(void) {return;}
 __attribute__((weak)) int tp_gesture_enable_flag(void) {return 0;}
 __attribute__((weak)) int tp_control_cs_gpio(bool enable) {return 0;}
@@ -92,6 +98,10 @@ static int mdss_tp_black_gesture_status(void){
 	/*default disable tp gesture*/
 	//tp add the interface for check black status to ret
 	ret = tp_gesture_enable_flag();
+	/* Y700 Fix C: also honour the Novatek driver's db_wakeup (see above);
+	 * nonzero here keeps the panel powered so the touch IC can wake us. */
+	if (!ret)
+		ret = nvt_db_wakeup_enabled();
 	pr_err("[TP]%s:ret = %d\n", __func__, ret);
 	return ret;
 }

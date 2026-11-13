@@ -76,6 +76,18 @@ static int32_t nvt_ts_suspend(struct device *dev);
 static int32_t nvt_ts_resume(struct device *dev);
 struct nvt_ts_data *ts;
 
+/* Y700 Fix C: exported for the display driver (dsi_panel.c). The Oplus
+ * tp_gesture_enable_flag() always returns 0 on this device (its driver
+ * never probes, g_tp is NULL), so the display side would fully power off
+ * the panel on screen-off and cut power to the touch IC, making the
+ * double-tap wake gesture (HOST_CMD 0x13) useless. Return nonzero while
+ * the Novatek wakeup gesture is enabled so the panel stays powered. */
+int nvt_db_wakeup_enabled(void)
+{
+	return (ts && ts->db_wakeup) ? 1 : 0;
+}
+EXPORT_SYMBOL_GPL(nvt_db_wakeup_enabled);
+
 #if BOOT_UPDATE_FIRMWARE
 static struct workqueue_struct *nvt_fwu_wq;
 static struct workqueue_struct *nvt_lockdown_wq;

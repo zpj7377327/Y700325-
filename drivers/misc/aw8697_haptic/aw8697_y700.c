@@ -94,7 +94,7 @@
 #define Y700_CONT_DRV_LVL_OV		0x7d	/* DT aw869x_cont_drv_lvl_ov */
 #define Y700_INDEX_DEFAULT		1	/* stock default waveform index */
 #define Y700_WAVEFORM_SINE_CYCLE	9	/* SINE_CYCLE, binary-proven */
-#define Y700_GAIN_CLAMP		0x80	/* RAM_VBAT_COMP_GAIN */
+#define Y700_GAIN_CLAMP		0xA0	/* RAM_VBAT_COMP_GAIN */
 #define Y700_RAM_FW_NAME		"aw8697_haptic.bin"
 #define Y700_SEQUENCER_SIZE		8
 /* f0 re-measurement period. v6p's runtime f0 drifts ~1.3 Hz/min
@@ -643,6 +643,7 @@ static int y700_motor_init_regs(struct y700_haptic *h, struct y700_motor *m)
 	/* gain / vmax as the chip powers up */
 	y700_i2c_read(m, AW8697_REG_DATDBG, &reg_val);
 	m->gain = reg_val & 0xFF;
+	m->gain = Y700_GAIN_CLAMP;	/* RAM vibration at 0xA0 (0x80 felt weak) */
 	y700_i2c_read(m, AW8697_REG_BSTDBG4, &reg_val);
 	m->vmax = (reg_val >> 1) & 0x1F;
 
@@ -1683,10 +1684,11 @@ static int y700_probe(struct i2c_client *i2c,
 	/* Async RAM waveform load (same file as v6p). */
 	y700_ram_update(h);
 
-	/* Start the background f0 re-measurement; the first cycle
-	 * runs Y700_F0_REMEASURE_MS after boot. */
-	schedule_delayed_work(&h->f0_work,
-			      msecs_to_jiffies(Y700_F0_REMEASURE_MS));
+	/* Background f0 re-measurement disabled: it drove both motors
+	 * for 500 ms every 5 min (random double-buzz). f0 stays at the
+	 * probe-time BEMF value. */
+	/* schedule_delayed_work(&h->f0_work,
+			      msecs_to_jiffies(Y700_F0_REMEASURE_MS)); */
 
 	pr_info("%s: probe ok, %d motor(s), f0=%d/%d, index=%d\n", __func__,
 		h->nmotors, h->motor[0].f0,

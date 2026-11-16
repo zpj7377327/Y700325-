@@ -142,6 +142,10 @@ struct dsi_backlight_config {
 #ifdef OPLUS_BUG_STABILITY
 	u32 bl_lvl_backup;
 	u32 bl_dc_real;
+	/* Y700: true while the backlight level is decreasing (screen dimming
+	 * before auto screen-off). Used to block refresh-rate drops during
+	 * dimming, which would flash the screen. */
+	bool y700_dimming;
 #endif /* OPLUS_BUG_STABILITY */
 	u32 bl_dcs_subtype;
 

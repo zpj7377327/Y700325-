@@ -10681,7 +10681,8 @@ static int init_vibrator_proc(struct aw8697 *aw8697)
 	struct proc_dir_entry *prEntry_da = NULL;
 	struct proc_dir_entry *prEntry_tmp = NULL;
 
-	prEntry_da = proc_mkdir("vibrator", NULL);
+	/* Y700 v6g: proc dir by I2C addr (2nd motor would collide on "vibrator") */
+	prEntry_da = proc_mkdir((aw8697->i2c->addr == 0x5B) ? "vibrator_l" : "vibrator", NULL);
 	if (prEntry_da == NULL) {
 		ret = -ENOMEM;
 		dev_err(aw8697->dev, "%s: Couldn't create vibrator proc entry\n",
@@ -10727,7 +10728,10 @@ static int aw8697_haptic_init(struct aw8697 *aw8697)
     pr_info("%s enter\n", __func__);
 
     ret = misc_register(&aw8697_haptic_misc);
-    if(ret) {
+    if(ret == -EBUSY) {
+        /* Y700: 2nd motor shares the misc device; non-fatal. */
+        dev_info(aw8697->dev, "%s: misc busy (2nd motor), continue\n", __func__);
+    } else if(ret) {
         dev_err(aw8697->dev,  "%s: misc fail: %d\n", __func__, ret);
         return ret;
     }
@@ -10741,14 +10745,13 @@ static int aw8697_haptic_init(struct aw8697 *aw8697)
     aw8697->haptic_audio.timer.function = aw8697_haptic_audio_timer_func;
     INIT_WORK(&aw8697->haptic_audio.work, aw8697_haptic_audio_work_routine);
 
-    mutex_init(&aw8697->haptic_audio.lock);
+    /* mutexes already inited in probe (v6f) */
     aw8697->gun_type = 0xff;
     aw8697->bullet_nr = 0x00;
     aw8697->gun_mode = 0x00;
 	aw8697->rtp_routine_on = 0; /*default rtp on is init to 0*/
     aw8697_op_clean_status(aw8697);
-     mutex_init(&aw8697->rtp_lock);
-	mutex_init(&aw8697->qos_lock);
+    /* mutexes already inited in probe (v6f) */
     /* haptic init */
     mutex_lock(&aw8697->lock);
 
@@ -13334,7 +13337,8 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
     pr_info("%s enter\n", __func__);
 
 #ifdef TIMED_OUTPUT
-    aw8697->to_dev.name = "vibrator";
+    /* Y700 v6g: name by I2C addr (0x5A right "vibrator", 0x5B left "vibrator_l") */
+    aw8697->to_dev.name = (aw8697->i2c->addr == 0x5B) ? "vibrator_l" : "vibrator";
     aw8697->to_dev.get_time = aw8697_vibrator_get_time;
     aw8697->to_dev.enable = aw8697_vibrator_enable;
 
@@ -13350,7 +13354,7 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
         return ret;
     }
 #else
-    aw8697->cdev.name = "vibrator";
+    aw8697->cdev.name = (aw8697->i2c->addr == 0x5B) ? "vibrator_l" : "vibrator";
     aw8697->cdev.brightness_get = aw8697_haptic_brightness_get;
     aw8697->cdev.brightness_set = aw8697_haptic_brightness_set;
 
@@ -13375,7 +13379,7 @@ static int aw8697_vibrator_init(struct aw8697 *aw8697)
 
     INIT_WORK(&aw8697->rtp_single_cycle_work, aw8697_rtp_single_cycle_routine);
     INIT_WORK(&aw8697->rtp_regroup_work, aw8697_rtp_regroup_routine);
-    mutex_init(&aw8697->lock);
+    /* mutex already inited in probe (v6f) */
 
     return 0;
 }
@@ -13768,6 +13772,15 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
 
     i2c_set_clientdata(i2c, aw8697);
 
+    /* Y700 v6f/v6j: init ALL mutexes here, before any IRQ can fire.
+     * IRQ is requested later in probe but can fire before the
+     * mutex_inits in vibrator_init/haptic_init ran, deadlocking
+     * the IRQ thread on a zeroed (locked-looking) mutex. */
+    mutex_init(&aw8697->lock);
+    mutex_init(&aw8697->rtp_lock);
+    mutex_init(&aw8697->qos_lock);
+    mutex_init(&aw8697->haptic_audio.lock);
+
     /* aw8697 rst & int */
     if (np) {
         ret = aw8697_parse_dt(&i2c->dev, aw8697, np);
@@ -13812,7 +13825,14 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
     if (gpio_is_valid(aw8697->reset_gpio)) {
         ret = devm_gpio_request_one(&i2c->dev, aw8697->reset_gpio,
             GPIOF_OUT_INIT_LOW, "aw8697_rst");
-        if (ret){
+        if (ret == -EBUSY) {
+            /* Y700: reset GPIO 61 is shared by both motors; the
+             * first probe already claimed it. Treat as shared,
+             * skip hw_reset for this instance. */
+            dev_info(&i2c->dev, "%s: reset gpio %d busy (shared), skip hw_reset\n",
+                     __func__, aw8697->reset_gpio);
+            aw8697->reset_gpio = -1;
+        } else if (ret){
             dev_err(&i2c->dev, "%s: rst request failed\n", __func__);
             goto err_reset_gpio_request;
         }
@@ -13828,10 +13848,17 @@ static int aw8697_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *
     }
 
     /* aw8697 chip id */
-    ret = aw8697_read_chipid(aw8697);
-    if (ret < 0) {
-        dev_err(&i2c->dev, "%s: aw8697_read_chipid failed ret=%d\n", __func__, ret);
-        goto err_id;
+    /* Y700 v6j bisection: skip chipid read for the 2nd motor (0x5B).
+     * If the boot hang disappears, read_chipid (or the I2C state
+     * after the shared-reset pulse) is the hang trigger. */
+    if (i2c->addr == 0x5B) {
+        dev_info(&i2c->dev, "%s: v6j diag: skip read_chipid for 2nd motor\n", __func__);
+    } else {
+        ret = aw8697_read_chipid(aw8697);
+        if (ret < 0) {
+            dev_err(&i2c->dev, "%s: aw8697_read_chipid failed ret=%d\n", __func__, ret);
+            goto err_id;
+        }
     }
 
 // add by huangtongfeng for vmalloc mem
@@ -14001,6 +14028,11 @@ MODULE_DEVICE_TABLE(i2c, aw8697_i2c_id);
 
 static struct of_device_id aw8697_dt_match[] = {
     { .compatible = "awinic,aw8697_haptic" },
+    /* Y700: stock dtbo nodes are awinic,haptic_hv_r (0x5A) and
+     * awinic,haptic_hv_l (0x5B); the chip is AW8697 (0x97), so the
+     * AW8697 driver (not the AW8692x haptic_hv driver) must bind. */
+    { .compatible = "awinic,haptic_hv_r" },
+    { .compatible = "awinic,haptic_hv_l" },
     { },
 };
 

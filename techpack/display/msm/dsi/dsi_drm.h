@@ -128,6 +128,18 @@ int dsi_conn_pre_kickoff(struct drm_connector *connector,
 int dsi_conn_post_kickoff(struct drm_connector *connector,
 		struct msm_display_conn_params *params);
 
+#ifdef OPLUS_BUG_STABILITY
+/*
+ * Y700: FPS sync to host timing-DB load (v5z-db). arm() is called from
+ * sde_encoder kickoff on every frame with the current refresh rate;
+ * on_db_load() is called from dsi_conn_post_kickoff after the VRR
+ * timing-DB updates and sends the pending FPS command there, so the
+ * panel switches at the same instant as the host timing.
+ */
+void dsi_display_y700_db_fps_arm(struct dsi_display *display, u32 fps);
+void dsi_display_y700_db_fps_on_db_load(struct dsi_display *display);
+#endif
+
 /**
  * dsi_convert_to_drm_mode - Update drm mode with dsi mode information
  * @dsi_mode: input parameter. structure having dsi mode information.

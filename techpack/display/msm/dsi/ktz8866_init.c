@@ -78,18 +78,56 @@ extern unsigned int dis_set_first_level;
 int lcd_bl_set_led_brightness(int value)//for set bringhtness
 {
 	unsigned int mapping_value;
+	unsigned int scaled_value;
+	/* Y700: track the KTZ8866 IC enable state directly, not the previous
+	 * brightness value. The old prev_value tracking raced when the user
+	 * slid the brightness bar rapidly (or auto-brightness changed it
+	 * quickly): a 0 -> non-zero transition could be missed if two calls
+	 * interleaved, leaving the IC disabled (reg 0x08 = 0x00) while the
+	 * brightness value was non-zero — screen stuck black, brightness
+	 * sysfs stuck at 1, and the watchdog eventually rebooted.
+	 * NOTE: no lock here on purpose. This function can be called from
+	 * atomic context during boot/mode-set (v5r hung at the first screen
+	 * because a mutex_lock slept there — though v5t later proved the
+	 * haptic LED name collision was the actual hang cause, not the
+	 * mutex). A redundant lcd_bl_enable(true) from two racing calls is
+	 * harmless — it just rewrites the same 5 regs — and the flag stays
+	 * correct enough: enable whenever the IC is off and brightness > 0,
+	 * disable on brightness 0. */
+	static bool bl_ic_enabled = false;
 	if (value < 0) {
 		pr_err("%d %s --lyd invalid value=%d\n", __LINE__, __func__, value);
 		return 0;
 	}
-	mapping_value = backlight_buf[value];
+	/* Y700: backlight_buf has 2048 entries (0-2047), but the value arriving
+	 * here is 0-255 (sysfs backlight range). Without scaling, max brightness
+	 * 255 only reaches table[255]=933 (~45% of the 2047 full scale), so the
+	 * screen is dim even at "max". Scale 0-255 -> 0-2047 before indexing.
+	 * If value is already >255 (framework 0-2047 range), use it as-is.
+	 * Clamp to 2047 to guard against any out-of-range input. */
+	if (value > 255)
+		scaled_value = (unsigned int)value;
+	else
+		scaled_value = (unsigned int)value * 2047 / 255;
+	if (scaled_value > 2047)
+		scaled_value = 2047;
+	mapping_value = backlight_buf[scaled_value];
 	pr_info("%s:hyper bl = %d, mapping value = %d\n", __func__, value, mapping_value);
 
 	if (value > 0) {
-		if(dis_set_first_level) {
+		/* Y700: re-enable the backlight IC whenever it is off and a
+		 * non-zero brightness is requested. dis_set_first_level is only
+		 * set in dsi_panel_power_on, not on a blank/unblank cycle, so
+		 * after screen-off (value 0 -> IC disabled via lcd_bl_enable
+		 * (false)) the next screen-on would write only the brightness
+		 * regs while the IC stays disabled (reg 0x08 = 0x00), leaving
+		 * the screen stuck dim. The bl_ic_enabled flag tracks the IC
+		 * state directly, so rapid brightness changes cannot desync it. */
+		if (!bl_ic_enabled || dis_set_first_level) {
 			lcd_bl_enable(true); /* BL enabled and Current sink 1/2/3/4/5 enabled */
 			dis_set_first_level = 0;
-			pr_info("%d %s dis_set_first_level=%d\n", __LINE__, __func__, dis_set_first_level);
+			bl_ic_enabled = true;
+			pr_info("%d %s Y700 BL re-enable\n", __LINE__, __func__);
 		}
 		lcd_bl_write_byte(0x04, mapping_value & 0x07); /* lsb */
 		lcd_bl_write_byte(0x05, (mapping_value >> 3) & 0xFF); /* msb */
@@ -99,6 +137,7 @@ int lcd_bl_set_led_brightness(int value)//for set bringhtness
 		lcd_bl_write_byte(0x04, 0x00);// lsb
 		lcd_bl_write_byte(0x05, 0x00);// msb
 		lcd_bl_enable(false); /* BL disabled and Current sink 1/2/3/4/5 disabled */
+		bl_ic_enabled = false;
 	}
 	return 0;
 }

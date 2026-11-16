@@ -2284,6 +2284,13 @@ static enum power_supply_property div2_cp_slave_props[] = {
 	POWER_SUPPLY_PROP_INPUT_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CURRENT_CAPABILITY,
 	POWER_SUPPLY_PROP_CP_TOGGLE_SWITCHER,
+	/* Y700 fast-charge fix: the framework / smb5 queries the slave
+	 * for ONLINE (26) and SCOPE (82); without them get_prop hits
+	 * default -> -EINVAL ("read div2_cp_slave property %d is not
+	 * supported") and the slave is treated as unavailable, so the
+	 * dual-pump fast-charge path never engages. */
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_SCOPE,
 };
 
 static int div2_cp_slave_get_prop(struct power_supply *psy,
@@ -2309,6 +2316,14 @@ static int div2_cp_slave_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CP_TOGGLE_SWITCHER:
 		pval->intval = 0;
+		break;
+	case POWER_SUPPLY_PROP_ONLINE:
+		/* Slave charge pump is present (probed) and available for
+		 * parallel fast charging. */
+		pval->intval = 1;
+		break;
+	case POWER_SUPPLY_PROP_SCOPE:
+		pval->intval = POWER_SUPPLY_SCOPE_SYSTEM;
 		break;
 	default:
 		dev_err(chip->dev, "read div2_cp_slave property %d is not supported\n",

@@ -19,12 +19,14 @@
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
 #include <linux/kthread.h>
+#include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/sde_rsc.h>
 
 #include "msm_drv.h"
 #include "sde_kms.h"
+#include "dsi_drm.h"
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
 #include "sde_hwio.h"
@@ -58,8 +60,11 @@
 
 #ifdef OPLUS_BUG_STABILITY
 volatile bool panel_initialized_flag = true;
+/* NOTE: do NOT remove old_refresh_rate: dsi_drm.c declares it extern
+ * (dsi_bridge_enable, ktz8866 fps60 path) and the link fails without it.
+ * The v5g kickoff removal does not use it any more, but the symbol must stay.
+ */
 volatile int old_refresh_rate = 120;
-extern int dsi_panel_fps120_cmd_set(struct dsi_panel *panel);
 #endif /*OPLUS_BUG_STABILITY*/
 
 
@@ -4817,6 +4822,7 @@ exit:
 	pm_runtime_put_sync(drm_enc->dev->dev);
 }
 
+
 int sde_encoder_poll_line_counts(struct drm_encoder *drm_enc)
 {
 	static const uint64_t timeout_us = 50000;
@@ -5428,33 +5434,7 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool is_error)
 	if (is_error)
 		_sde_encoder_reset_ctl_hw(drm_enc);
 
-#ifdef OPLUS_BUG_STABILITY
-	if(sde_enc->disp_info.intf_type == DRM_MODE_CONNECTOR_DSI) {
-		sde_conn = to_sde_connector(sde_enc->cur_master->connector);
-		if (!sde_conn) {
-			SDE_ERROR("fps sde_encoder_kickoff sde_conn is null\n");
-			return;
-		}
-		display = sde_conn->display;
-		if (!display) {
-			SDE_ERROR("fps sde_encoder_kickoff display is null\n");
-			return;
-		}
-	}
 
-	if((sde_enc->disp_info.intf_type == DRM_MODE_CONNECTOR_DSI)
-			&& (display->panel->nt36523w_ktz8866) && panel_initialized_flag) {
-		if(sde_enc->mode_info.frame_rate == 120 && old_refresh_rate != sde_enc->mode_info.frame_rate) {
-			rc = dsi_panel_fps120_cmd_set(display->panel);
-			if(rc) {
-				SDE_ERROR("fps120 failed to set cmd\n");
-			} else {
-				pr_info("fps120 success to set cmd, fps old_fps=%d\n", old_refresh_rate);
-				old_refresh_rate = sde_enc->mode_info.frame_rate;
-			}
-		}
-	}
-#endif /*OPLUS_BUG_STABILITY*/
 
 #if defined(OPLUS_FEATURE_PXLW_IRIS5)
 	iris_sde_encoder_kickoff(sde_enc->num_phys_encs,
@@ -5474,6 +5454,30 @@ void sde_encoder_kickoff(struct drm_encoder *drm_enc, bool is_error)
 					}
 				}
 			}
+		}
+	}
+#endif /* OPLUS_BUG_STABILITY */
+#ifdef OPLUS_BUG_STABILITY
+	/*
+	 * Y700: direction-aware FPS send (v5z-dd). dfps_update has
+	 * already programmed the host VFP for the new rate. A RISE is
+	 * sent in kickoff here (panel first); a DROP is only recorded
+	 * here and sent in dsi_conn_post_kickoff right after the
+	 * timing-DB load (host first), so panel and host switch at the
+	 * same instant. Same gate as before: panel initialized +
+	 * ktz8866 or the Y700 panel name.
+	 */
+	if (sde_enc && sde_enc->cur_master && sde_enc->cur_master->connector) {
+		struct dsi_display *y700_disp =
+			sde_connector_get_display(sde_enc->cur_master->connector);
+		if (y700_disp && y700_disp->panel &&
+		    y700_disp->panel->panel_initialized &&
+		    (y700_disp->panel->nt36523w_ktz8866 ||
+		     !strcmp(y700_disp->panel->name,
+			     "nt36523 lcd vid mode dsi panel")) &&
+		    y700_disp->panel->cur_mode) {
+			dsi_display_y700_db_fps_arm(y700_disp,
+				y700_disp->panel->cur_mode->timing.refresh_rate);
 		}
 	}
 #endif /* OPLUS_BUG_STABILITY */

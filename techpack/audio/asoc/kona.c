@@ -408,7 +408,7 @@ static struct regulator *kona_bob_regulator = NULL;
 /* Default configuration of TDM channels */
 static struct dev_config tdm_rx_cfg[TDM_INTERFACE_MAX][TDM_PORT_MAX] = {
 	{ /* PRI TDM */
-		{SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1}, /* RX_0 */
+		{SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 2}, /* RX_0 - Y700: stereo for dual CS35L45 (was mono 1, which blocked the right mixer channel) */
 		{SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1}, /* RX_1 */
 		{SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1}, /* RX_2 */
 		{SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 1}, /* RX_3 */
@@ -4893,6 +4893,35 @@ static int kona_tdm_snd_hw_params(struct snd_pcm_substream *substream,
 				__func__, ret);
 			goto end;
 		}
+
+		/* Y700: also configure each codec DAI's TDM slot. The core
+		 * only calls set_tdm_slot on the CPU DAI here; the codec
+		 * DAIs (the two CS35L45) would otherwise keep their
+		 * reset-default slots and never hear their channel. Only
+		 * applies to multi-codec links (our PRI_TDM_RX_0 with two
+		 * CS35L45); single stub-codec TDM links are untouched.
+		 * Codec i listens to the slot of channel i (left chip ->
+		 * channel 0's slot, right chip -> channel 1's slot). */
+		if (rtd->num_codecs > 1) {
+			int i;
+			for (i = 0; i < rtd->num_codecs; i++) {
+				struct snd_soc_dai *codec_dai =
+					rtd->codec_dais[i];
+				unsigned int codec_rx_mask;
+				if (i < channels)
+					codec_rx_mask = 1 << slot_offset[i];
+				else
+					codec_rx_mask = 1 << i;
+				ret = snd_soc_dai_set_tdm_slot(codec_dai, 0,
+								 codec_rx_mask,
+								 slots, slot_width);
+				if (ret < 0) {
+					pr_err("%s: failed to set codec %d tdm rx slot, err:%d\n",
+						__func__, i, ret);
+					goto end;
+				}
+			}
+		}
 	} else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 		/*2 slot config - bits 0 and 1 set for the first two slots */
 		slot_mask = 0x0000FFFF >> (16 - slots);
@@ -6925,6 +6954,13 @@ static struct snd_soc_dai_link msm_common_be_dai_links[] = {
 };
 
 
+/* Y700: CS35L45 speaker amps (SPK1/SPK2) on Primary TDM.
+ * Both chips share the PRI_TDM bus; the machine driver fills in their
+ * DT nodes (from cirrus,cs35l45-devs) in msm_init_aux_dev, before the
+ * card is registered. DAI name is "cs35l45" for both chips.
+ */
+static struct snd_soc_dai_link_component msm_cs35l45_codecs[2];
+
 static struct snd_soc_dai_link msm_tdm_be_dai_links[] = {
 	{
 		.name = LPASS_BE_PRI_TDM_RX_0,
@@ -7231,8 +7267,8 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.stream_name = "Primary MI2S Playback",
 		.cpu_dai_name = "msm-dai-q6-mi2s.0",
 		.platform_name = "msm-pcm-routing",
-		.codec_name = "msm-stub-codec.1",
-		.codec_dai_name = "msm-stub-rx",
+		.codecs = msm_cs35l45_codecs,
+		.num_codecs = 2,
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_PRI_MI2S_RX,
@@ -8397,6 +8433,13 @@ static int msm_init_aux_dev(struct platform_device *pdev,
 	int i;
 	struct msm_wsa881x_dev_info *wsa881x_dev_info = NULL;
 	struct aux_codec_dev_info *aux_cdc_dev_info = NULL;
+#ifdef CONFIG_SND_SOC_CS35L45
+	/* Y700: Cirrus CS35L45 aux devices (SPK1/SPK2) */
+	u32 cs35l45_max_devs = 0;
+	u32 cs35l45_dev_cnt = 0;
+	struct aux_codec_dev_info *cs35l45_dev_info = NULL;
+	int cs35l45_found = 0;
+#endif
 	const char *auxdev_name_prefix[1];
 	char *dev_name_str = NULL;
 	int found = 0;
@@ -8420,13 +8463,13 @@ static int msm_init_aux_dev(struct platform_device *pdev,
 			 "%s: wsa-max-devs property missing in DT %s, ret = %d\n",
 			 __func__, pdev->dev.of_node->full_name, ret);
 		wsa_max_devs = 0;
-		goto codec_aux_dev;
+		goto cs35l45_aux_dev;
 	}
 	if (wsa_max_devs == 0) {
 		dev_warn(&pdev->dev,
 			 "%s: Max WSA devices is 0 for this target?\n",
 			 __func__);
-		goto codec_aux_dev;
+		goto cs35l45_aux_dev;
 	}
 
 	/* Get count of WSA device phandles for this platform */
@@ -8515,6 +8558,125 @@ static int msm_init_aux_dev(struct platform_device *pdev,
 	dev_info(&pdev->dev,
 		"%s: found %d wsa881x devices registered with ALSA core\n",
 		__func__, found);
+
+cs35l45_aux_dev:
+#ifdef CONFIG_SND_SOC_CS35L45
+	/* Y700: Cirrus CS35L45 aux devices (SPK1/SPK2) */
+	{
+		struct device_node *cs35l45_of_node;
+
+		/* Get maximum CS35L45 device count for this platform */
+		ret = of_property_read_u32(pdev->dev.of_node,
+					   "cirrus,cs35l45-max-devs",
+					   &cs35l45_max_devs);
+		if (ret) {
+			dev_info(&pdev->dev,
+				 "%s: cs35l45-max-devs property missing in DT %s, ret = %d\n",
+				 __func__, pdev->dev.of_node->full_name, ret);
+			cs35l45_max_devs = 0;
+			goto codec_aux_dev;
+		}
+		if (cs35l45_max_devs == 0) {
+			dev_dbg(&pdev->dev,
+				"%s: Max CS35L45 devices is 0 for this target?\n",
+				__func__);
+			goto codec_aux_dev;
+		}
+
+		/* Get count of CS35L45 device phandles for this platform */
+		cs35l45_dev_cnt = of_count_phandle_with_args(
+					pdev->dev.of_node,
+					"cirrus,cs35l45-devs", NULL);
+		if (cs35l45_dev_cnt == -ENOENT) {
+			dev_warn(&pdev->dev,
+				 "%s: No cs35l45 device defined in DT.\n",
+				 __func__);
+			goto err;
+		} else if (cs35l45_dev_cnt <= 0) {
+			dev_err(&pdev->dev,
+				"%s: Error reading cs35l45 device from DT. dev_cnt = %d\n",
+				__func__, cs35l45_dev_cnt);
+			ret = -EINVAL;
+			goto err;
+		}
+
+		if (cs35l45_dev_cnt < cs35l45_max_devs) {
+			dev_dbg(&pdev->dev,
+				"%s: cs35l45_max_devs = %d cannot exceed dev_cnt = %d\n",
+				__func__, cs35l45_max_devs, cs35l45_dev_cnt);
+			cs35l45_max_devs = cs35l45_dev_cnt;
+		}
+
+		/* Make sure prefix string passed for each CS35L45 device */
+		ret = of_property_count_strings(pdev->dev.of_node,
+						"cirrus,cs35l45-aux-dev-prefix");
+		if (ret != cs35l45_dev_cnt) {
+			dev_err(&pdev->dev,
+				"%s: expecting %d cs35l45 prefix. Defined only %d in DT\n",
+				__func__, cs35l45_dev_cnt, ret);
+			ret = -EINVAL;
+			goto err;
+		}
+
+		cs35l45_dev_info = devm_kcalloc(&pdev->dev, cs35l45_max_devs,
+						sizeof(struct aux_codec_dev_info),
+						GFP_KERNEL);
+		if (!cs35l45_dev_info) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
+		for (i = 0; i < cs35l45_dev_cnt; i++) {
+			cs35l45_of_node = of_parse_phandle(pdev->dev.of_node,
+							   "cirrus,cs35l45-devs", i);
+			if (unlikely(!cs35l45_of_node)) {
+				dev_err(&pdev->dev,
+					"%s: cs35l45 dev node is not present\n",
+					__func__);
+				ret = -EINVAL;
+				goto err;
+			}
+			if (soc_find_component_locked(cs35l45_of_node, NULL)) {
+				cs35l45_dev_info[cs35l45_found].of_node =
+							cs35l45_of_node;
+				cs35l45_dev_info[cs35l45_found].index = i;
+				/* Y700: also wire this chip into the Primary
+				 * TDM backend DAI link (msm_cs35l45_codecs),
+				 * so playback flows into the amp ASP_RX1 and
+				 * its AMP/GLOBAL_EN power on. The link's
+				 * .codecs pointer is shared with the card
+				 * (memcpy copies the pointer), so filling it
+				 * here (before register_card) is enough. */
+				if (cs35l45_found < 2) {
+					msm_cs35l45_codecs[cs35l45_found].of_node =
+						cs35l45_of_node;
+					msm_cs35l45_codecs[cs35l45_found].dai_name =
+						"cs35l45";
+				}
+				cs35l45_found++;
+				if (cs35l45_found == cs35l45_max_devs)
+					break;
+			}
+		}
+
+		if (cs35l45_found < cs35l45_max_devs) {
+			dev_dbg(&pdev->dev,
+				"%s: failed to find %d components. Found only %d, skipping cs35l45 aux devs\n",
+				__func__, cs35l45_max_devs, cs35l45_found);
+			/* Y700: cs35l45 codec driver not registered yet.
+			 * Do NOT return -EPROBE_DEFER here: the whole sound
+			 * card would never bind, the audio HAL retries the
+			 * mixer forever and boot hangs at the boot animation
+			 * (AudioPolicyService never publishes). Bind the
+			 * card without cs35l45 instead. */
+			cs35l45_max_devs = 0;
+			goto codec_aux_dev;
+		}
+		dev_info(&pdev->dev,
+			"%s: found %d cs35l45 devices registered with ALSA core\n",
+			__func__, cs35l45_found);
+	}
+#endif /* CONFIG_SND_SOC_CS35L45 */
 
 codec_aux_dev:
 	/* Get maximum aux codec device count for this platform */
@@ -8615,6 +8777,10 @@ codec_aux_dev:
 aux_dev_register:
 	card->num_aux_devs = wsa_max_devs + codec_aux_dev_cnt;
 	card->num_configs = wsa_max_devs + codec_aux_dev_cnt;
+#ifdef CONFIG_SND_SOC_CS35L45
+	card->num_aux_devs += cs35l45_max_devs;
+	card->num_configs += cs35l45_max_devs;
+#endif
 
 #ifdef CONFIG_SND_SOC_SIA81XX
 	rc = of_property_read_string(pdev->dev.of_node,
@@ -8700,6 +8866,42 @@ aux_dev_register:
 		msm_codec_conf[wsa_max_devs + i].of_node =
 				aux_cdc_dev_info[i].of_node;
 	}
+
+#ifdef CONFIG_SND_SOC_CS35L45
+	/* Y700: Cirrus CS35L45 aux devs (SPK1/SPK2 name_prefix) */
+	for (i = 0; i < cs35l45_max_devs; i++) {
+		int idx = wsa_max_devs + codec_aux_dev_cnt + i;
+
+		ret = of_property_read_string_index(pdev->dev.of_node,
+						    "cirrus,cs35l45-aux-dev-prefix",
+						    cs35l45_dev_info[i].index,
+						    auxdev_name_prefix);
+		if (ret) {
+			dev_err(&pdev->dev,
+				"%s: failed to read cs35l45 aux dev prefix, ret = %d\n",
+				__func__, ret);
+			ret = -EINVAL;
+			goto err;
+		}
+
+		msm_aux_dev[idx].name = NULL;
+		msm_aux_dev[idx].codec_name = NULL;
+		msm_aux_dev[idx].codec_of_node =
+					cs35l45_dev_info[i].of_node;
+		/* Y700: cs35l45 is an aux amp, NOT a WCD codec.
+		 * msm_aux_codec_init() calls wcd938x_mbhc_hs_detect()
+		 * (headset detection) which fails on a cs35l45
+		 * component and makes snd_soc_register_card() fail,
+		 * so the whole sound card never binds (v7e: no
+		 * soundcards, boot stuck at animation). The codec
+		 * driver does its own setup; no machine init needed. */
+		msm_aux_dev[idx].init = NULL;
+		msm_codec_conf[idx].dev_name = NULL;
+		msm_codec_conf[idx].name_prefix = auxdev_name_prefix[0];
+		msm_codec_conf[idx].of_node =
+					cs35l45_dev_info[i].of_node;
+	}
+#endif
 
 	card->codec_conf = msm_codec_conf;
 	card->aux_dev = msm_aux_dev;

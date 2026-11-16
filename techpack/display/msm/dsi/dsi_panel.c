@@ -1478,6 +1478,17 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 		lcdinfo_notify(LCM_BRIGHTNESS_TYPE, &bl_lvl);
 		DSI_DEBUG("backlight type:%d lvl:%d\n", bl->type, bl_lvl);
 	}
+#ifdef OPLUS_BUG_STABILITY
+	/* Y700: track whether the backlight is currently dimming (level
+	 * decreasing while the screen is still on). The auto screen-off
+	 * dimming drops the refresh rate 120->60 Hz and flashes; the rate
+	 * must stay at 120 Hz while dimming. dsi_display_set_mode checks
+	 * this flag and blocks rate decreases while it is set. */
+	if (bl_lvl < panel->bl_config.bl_lvl_backup && bl_lvl > 0)
+		panel->bl_config.y700_dimming = true;
+	else
+		panel->bl_config.y700_dimming = false;
+#endif /* OPLUS_BUG_STABILITY */
 	panel->bl_config.bl_lvl_backup = bl_lvl;
 //#endif /* OPLUS_BUG_STABILITY */
 	switch (bl->type) {
@@ -1490,7 +1501,8 @@ int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)
 	case DSI_BACKLIGHT_EXTERNAL:
 		#ifdef OPLUS_BUG_STABILITY
 		/* add for oslo bringup */
-		if(panel->nt36523w_ktz8866){
+		if (panel->nt36523w_ktz8866 ||
+		    !strcmp(panel->name, "nt36523 lcd vid mode dsi panel")) {
 			if(bl_lvl < 0 || bl_lvl > 0x7ff) {
 				DSI_ERR("%d %s oslo invalid backlight value = %d\n", __LINE__, __func__, bl_lvl);
 			} else {
@@ -5025,7 +5037,6 @@ void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
 	display_mode->pixel_clk_khz =  display_mode->pixel_clk_khz / 1000;
 }
 
-
 int dsi_panel_get_mode(struct dsi_panel *panel,
 			u32 index, struct dsi_display_mode *mode,
 			int topology_override)
@@ -5100,6 +5111,8 @@ int dsi_panel_get_mode(struct dsi_panel *panel,
 			DSI_ERR("failed to parse command sets, rc=%d\n", rc);
 			goto parse_fail;
 		}
+
+
 
 #ifdef OPLUS_BUG_STABILITY
 		rc = dsi_panel_parse_oplus_mode_config(mode, utils);
@@ -5879,6 +5892,13 @@ int dsi_panel_enable(struct dsi_panel *panel)
 
 #ifdef OPLUS_BUG_STABILITY
 	pr_err("%s\n", __func__);
+	/* Y700: reset first-level flag on every panel enable, not just power-on.
+	 * A blank/unblank cycle never goes through dsi_panel_power_on, so without
+	 * this the DCS 0x51=2047 (panel brightness) is never re-sent after resume
+	 * and the screen stays dim even though the KTZ8866 is re-enabled and set
+	 * correctly. The next backlight set after enable re-sends DCS 2047 and
+	 * re-enables the KTZ8866, then clears the flag. */
+	dis_set_first_level = 1;
 #endif
 
 #ifdef OPLUS_BUG_STABILITY

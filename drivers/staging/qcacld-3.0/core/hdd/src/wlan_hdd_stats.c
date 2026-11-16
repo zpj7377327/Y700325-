@@ -5590,7 +5590,7 @@ out:
 	return status;
 }
 
-#ifdef WLAN_FEATURE_MIB_STATS
+#if defined(WLAN_FEATURE_MIB_STATS) && defined(WLAN_DEBUGFS)
 QDF_STATUS wlan_hdd_get_mib_stats(struct hdd_adapter *adapter)
 {
 	int ret = 0;

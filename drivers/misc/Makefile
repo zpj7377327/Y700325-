@@ -89,6 +89,7 @@ obj-$(CONFIG_COLOR_CTRL_V2) 	+= colorctrl_v2/
 #ifdef VENDOR_EDIT//Qingjun.Wang@BSP.Haptic,add 2020/03/17 for vib aw8697
 obj-$(CONFIG_AW8697_HAPTIC)     += aw8697_haptic/
 #endif
+obj-$(CONFIG_DRV2667)           += drv2667.o
 
 obj-$(CONFIG_FPR_FPC)		+= fpr_FingerprintCard/
 

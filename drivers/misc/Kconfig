@@ -705,6 +705,14 @@ source "drivers/misc/colorctrl_v2/Kconfig"
 #ifdef OPLUS_FEATURE_TP_BASIC//Qingjun.Wang@BSP.Haptic,add 2020/03/17 for vib aw8697
 source "drivers/misc/aw8697_haptic/Kconfig"
 #endif
+config DRV2667
+	tristate "TI DRV2667 piezo haptics driver (sysfs play_wave)"
+	depends on I2C
+	select REGMAP_I2C
+	default n
+	help
+	  Say Y to enable the TI DRV2667 piezo driver for the Lenovo
+	  Legion Y700 1st gen back-panel light feature.
 source "drivers/misc/fpr_FingerprintCard/Kconfig"
 source "drivers/misc/qrc/Kconfig"
 endmenu

@@ -26,6 +26,7 @@
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/debugfs.h>
+#include <drm/drm_panel.h>
 
 #if defined(CONFIG_FB)
 #ifdef CONFIG_DRM
@@ -76,6 +77,19 @@ static int32_t nvt_ts_suspend(struct device *dev);
 static int32_t nvt_ts_resume(struct device *dev);
 struct nvt_ts_data *ts;
 
+/* Y700 DT2W: let the display driver ask the touch driver directly
+ * whether the double-tap wakeup gesture is enabled. The display's
+ * mdss_tp_black_gesture_status() used to call the OPPO framework's
+ * tp_gesture_enable_flag(), which reads global g_tp -- NULL on Y700
+ * (OPPO touch framework never probes) -- so it always returned 0.
+ * Returns db_wakeup bit0 (double-tap wake); 0 if the driver has not
+ * probed yet (ts == NULL) or the gesture is off. */
+int nvt_db_wakeup_enabled(void)
+{
+	return ts ? !!(ts->db_wakeup & 0x01) : 0;
+}
+EXPORT_SYMBOL_GPL(nvt_db_wakeup_enabled);
+
 #if BOOT_UPDATE_FIRMWARE
 static struct workqueue_struct *nvt_fwu_wq;
 static struct workqueue_struct *nvt_lockdown_wq;
@@ -90,6 +104,7 @@ extern void Boot_Update_Firmware(struct work_struct *work);
 extern int msm_drm_register_client(struct notifier_block *nb);
 extern int msm_drm_unregister_client(struct notifier_block *nb);
 static int nvt_msm_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
+static int nvt_drm_panel_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
 #if defined(CONFIG_FB)
 #ifdef CONFIG_DRM
 static int nvt_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
@@ -2236,13 +2251,14 @@ static void nvt_pen_charge_state_change_work(struct work_struct *work)
 
 static void nvt_set_gesture_mode()
 {
+	/* Y700 DT2W-minimal: nvt_ts_suspend reads runtime db_wakeup again
+	 * (#6 compile-time WAKEUP_GESTURE reverted; see suspend/resume).
+	 * The old logic saved db_wakeup to gesture_command_delayed and
+	 * cleared it to 0 when the panel was off, so if the user enabled
+	 * DT2W while the panel was off, suspend read db_wakeup==0 and
+	 * went to deep sleep (0x11) instead of gesture mode (0x13).
+	 * db_wakeup is never cleared here anymore. */
 	NVT_LOG("%s double click wakeup", ts->db_wakeup ? "ENABLE" : "DISABLE");
-	if (ts->ic_state <= NVT_IC_SUSPEND_OUT && ts->ic_state != NVT_IC_INIT ) {
-		ts->gesture_command_delayed = ts->db_wakeup;
-		NVT_LOG("Panel off, don't set dbclick gesture flag util panel on");
-		ts->db_wakeup = 0;
-	} else  if (ts->ic_state >= NVT_IC_RESUME_IN){
-	}
 }
 
 static int nvt_set_cur_value(int nvt_mode, int nvt_value)
@@ -2949,7 +2965,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	ts->input_dev->evbit[0] = BIT_MASK(EV_SYN) | BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
 	ts->input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 	ts->input_dev->propbit[0] = BIT(INPUT_PROP_DIRECT);
-	ts->db_wakeup = 0x01; /* Y700 v6y: double-tap wake defaults ON (bit0). 13.1 framework never calls the Xiaomi touch interface to enable it, so default it on. Toggle via /proc/nvt_double_tap. */
+	ts->db_wakeup = 0x03; /* Y700 DT2W-minimal: double-tap + pen wakeup on by default, so nvt_ts_suspend sends 0x13 (gesture mode). /proc/nvt_double_tap still toggles it. NOTE: #6 tried compile-time WAKEUP_GESTURE for suspend/resume and hung at the first screen (resume skipped pinctrl restore + IRQ enable); reverted to runtime db_wakeup. */
 	ts->fw_ver = 0;
 	ts->x_num = 32;
 	ts->y_num = 50;
@@ -3185,6 +3201,36 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		goto err_register_msm_drm_notif_failed;
 	}
 
+	/* Y700 DT2W-stock: DRM panel notifier (stock ZUI15 approach).
+	 * Best-effort: the MSM DRM notifier above already delivers panel
+	 * blank/unblank, so a failure here must not fail probe. The touch
+	 * DT node carries panel = <phandle>. */
+	{
+		struct device_node *panel_node =
+			of_parse_phandle(client->dev.of_node, "panel", 0);
+		ts->drm_panel = NULL;
+		if (panel_node) {
+			ts->drm_panel = of_drm_find_panel(panel_node);
+			of_node_put(panel_node);
+			if (!IS_ERR(ts->drm_panel)) {
+				ts->drm_panel_notif.notifier_call =
+					nvt_drm_panel_notifier_callback;
+				ret = drm_panel_notifier_register(ts->drm_panel,
+						&ts->drm_panel_notif);
+				if (ret) {
+					NVT_ERR("register drm panel notifier failed. ret=%d\n", ret);
+					ts->drm_panel = NULL;
+				}
+			} else {
+				NVT_LOG("drm panel not found, skip drm panel notifier (ret=%ld)\n",
+					PTR_ERR(ts->drm_panel));
+				ts->drm_panel = NULL;
+			}
+		} else {
+			NVT_LOG("no panel phandle, skip drm panel notifier\n");
+		}
+	}
+
 	/* is usb exit init */
 	ts->is_usb_exist = -1;
 	mutex_init(&ts->power_supply_lock);
@@ -3237,6 +3283,8 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 err_register_power_supply_notif_failed:
 	mutex_destroy(&ts->power_supply_lock);
+	if (ts->drm_panel)
+		drm_panel_notifier_unregister(ts->drm_panel, &ts->drm_panel_notif);
 	if (msm_drm_unregister_client(&ts->msm_drm_notif))
 		NVT_ERR("Error occurred while unregistering msm drm notifier.\n");
 err_register_msm_drm_notif_failed:
@@ -3348,6 +3396,8 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 {
 	NVT_LOG("Removing driver...\n");
 
+	if (ts->drm_panel)
+		drm_panel_notifier_unregister(ts->drm_panel, &ts->drm_panel_notif);
 	if (msm_drm_unregister_client(&ts->msm_drm_notif))
 		NVT_ERR("Error occurred while unregistering msm drm notifier.\n");
 if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
@@ -3426,6 +3476,8 @@ static void nvt_ts_shutdown(struct spi_device *client)
 
 	nvt_irq_enable(false);
 
+	if (ts->drm_panel)
+		drm_panel_notifier_unregister(ts->drm_panel, &ts->drm_panel_notif);
 	if (msm_drm_unregister_client(&ts->msm_drm_notif))
 		NVT_ERR("Error occurred while unregistering msm drm notifier.\n");
 if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
@@ -3682,6 +3734,37 @@ static int nvt_msm_drm_notifier_callback(struct notifier_block *self, unsigned l
 			queue_work(ts->event_wq, &ts->resume_work);
 		}
 	}
+	return 0;
+}
+
+/* Y700 DT2W-stock: DRM panel notifier (stock ZUI15 approach: the touch
+ * driver passively listens to the display panel blank/unblank).
+ * The display side (sde_kms.c) calls drm_panel_notifier_call_chain()
+ * with a struct drm_panel_notifier whose ->data points at the blank
+ * mode (DRM_PANEL_BLANK_POWERDOWN / DRM_PANEL_BLANK_UNBLANK).
+ * nvt_ts_suspend()/nvt_ts_resume() are idempotent (bTouchIsAwake
+ * guard), so a duplicate call from the MSM DRM notifier is harmless. */
+static int nvt_drm_panel_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
+{
+	struct drm_panel_notifier *evdata = data;
+	int *blank;
+	struct nvt_ts_data *ts =
+		container_of(self, struct nvt_ts_data, drm_panel_notif);
+
+	if (!evdata || !evdata->data || !ts)
+		return 0;
+
+	blank = evdata->data;
+	if (event == DRM_PANEL_EVENT_BLANK) {
+		if (*blank == DRM_PANEL_BLANK_POWERDOWN) {
+			NVT_LOG("drm panel powerdown\n");
+			nvt_ts_suspend(&ts->client->dev);
+		} else if (*blank == DRM_PANEL_BLANK_UNBLANK) {
+			NVT_LOG("drm panel unblank\n");
+			nvt_ts_resume(&ts->client->dev);
+		}
+	}
+
 	return 0;
 }
 

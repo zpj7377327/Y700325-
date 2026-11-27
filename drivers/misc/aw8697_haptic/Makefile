@@ -1,14 +1,6 @@
-#for AWINIC AW8697 Haptic
-#ifdef OPLUS_FEATURE_CHG_BASIC
-ifeq ($(strip $(BRAND_SHOW_FLAG)), oneplus)
-	ccflags-y += -DCONFIG_OPLUS_HAPTIC_OOS
-else ifeq ($(strip $(CONFIG_CHG_FOR_OP9_PRO)), y)
-	ccflags-y += -DCONFIG_OPLUS_HAPTIC_OOS
-else ifeq ($(strip $(CONFIG_OPLUS_CHG_OOS)), y)
-	ccflags-y += -DCONFIG_OPLUS_HAPTIC_OOS
-endif
-#endif
-obj-$(CONFIG_AW8697_HAPTIC) += aw8697.o
-
-obj-$(CONFIG_AW8697_HAPTIC) += haptic.o
-haptic-objs := aw8692x.o haptic_hv.o
+# Y700 AW8697 haptic driver (clean rewrite, 2026-11-12)
+# Only aw8697_y700.o is built. The old OPPO driver (aw8697.o +
+# haptic.o = aw8692x.o + haptic_hv.o) is NOT built: aw8697_reg.h
+# defines a non-static aw8697_reg_access[] table, so it may be
+# included by exactly one .c file in this directory.
+obj-$(CONFIG_AW8697_HAPTIC) += aw8697_y700.o

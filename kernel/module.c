@@ -1321,7 +1321,6 @@ static int check_version(const struct load_info *info,
 			 struct module *mod,
 			 const s32 *crc)
 {
-	return 1; /* Y700 audio: accept vendor 4.19.157 module symbol CRCs */
 	Elf_Shdr *sechdrs = info->sechdrs;
 	unsigned int versindex = info->index.vers;
 	unsigned int i, num_versions;
@@ -1388,7 +1387,6 @@ static inline int check_modstruct_version(const struct load_info *info,
 static inline int same_magic(const char *amagic, const char *bmagic,
 			     bool has_crcs)
 {
-	return 1; /* Y700 audio: accept vendor 4.19.157 vermagic */
 	if (has_crcs) {
 		amagic += strcspn(amagic, " ");
 		bmagic += strcspn(bmagic, " ");
@@ -2884,8 +2882,6 @@ static inline void kmemleak_load_module(const struct module *mod,
 #ifdef CONFIG_MODULE_SIG
 static int module_sig_check(struct load_info *info, int flags)
 {
-	info->sig_ok = true; /* Y700 audio: accept vendor 4.19.157 signed modules */
-	return 0;
 	int err = -ENOKEY;
 	const unsigned long markerlen = sizeof(MODULE_SIG_STRING) - 1;
 	const void *mod = info->hdr;

@@ -1200,10 +1200,3 @@ static noinline void __init kernel_init_freeable(void)
 	integrity_load_keys();
 	load_default_modules();
 }
-
-/* Y700 audio: stub for vendor Cirrus CS35L45 ko (OPPO hardwareinfo prop) */
-int hardwareinfo_set_prop(int id, const char *value, ...)
-{
-	return 0;
-}
-EXPORT_SYMBOL(hardwareinfo_set_prop);

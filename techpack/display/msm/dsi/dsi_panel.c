@@ -87,18 +87,11 @@ __attribute__((weak)) int tp_control_cs_gpio(bool enable) {return 0;}
 static int tp_black_power_on_ff_flag = 0;
 static int tp_cs_flag = 0;
 
-/* Y700 DT2W: nt36523 touch driver export (see nt36xxx.c). The OPPO
- * framework's tp_gesture_enable_flag() reads global g_tp, which is
- * NULL on Y700 (OPPO touch framework never probes), so it always
- * returns 0 and the display never knew the gesture was on. */
-extern int nvt_db_wakeup_enabled(void);
-
 static int mdss_tp_black_gesture_status(void){
 	int ret = 0;
-	/* Y700 DT2W: ask the nt36523 driver directly for its db_wakeup
-	 * bit0 (double-tap wake). Do NOT use tp_gesture_enable_flag()
-	 * (OPPO framework, g_tp is NULL on Y700, always 0). */
-	ret = nvt_db_wakeup_enabled();
+	/*default disable tp gesture*/
+	//tp add the interface for check black status to ret
+	ret = tp_gesture_enable_flag();
 	pr_err("[TP]%s:ret = %d\n", __func__, ret);
 	return ret;
 }
@@ -784,14 +777,6 @@ exit:
 static int dsi_panel_power_off(struct dsi_panel *panel)
 {
 	int rc = 0;
-	/* Y700 DT2W partial power-off: when the touch gesture is on, keep
-	 * the panel/touch power rails up (the touch IC has no independent
-	 * supply and dies with the panel), but still do DSI sleep + reset
-	 * so the panel IC lands in a deterministic state. Unlike Fix C,
-	 * do NOT return early here. Declared outside the ifdef so the
-	 * skip conditions below always compile; stays false when
-	 * OPLUS_BUG_STABILITY is off (original full power-off). */
-	bool tp_gesture_on = false;
 
 #ifdef OPLUS_BUG_STABILITY
 	int esd_check = get_esd_check_happened();
@@ -799,15 +784,15 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 #endif
 
 #ifdef OPLUS_BUG_STABILITY
-	tp_gesture_on = !esd_check && mdss_tp_black_gesture_status();
-	if (tp_gesture_on) {
+	if(!esd_check && mdss_tp_black_gesture_status()) {
 		tp_black_power_on_ff_flag = 0;
-		pr_err("%s : [TP] tp gesture is enable, partial dsi_panel_power_off (keep power), tp_black_power_on_ff_flag = %d\n",
+		pr_err("%s : [TP] tp gesture is enable, not to dsi_panel_power_off, tp_black_power_on_ff_flag = %d\n",
 			__func__, tp_black_power_on_ff_flag);
-	} else {
-		tp_black_power_on_ff_flag = 1;
-		pr_err("%s:[TP]tp_black_power_on_ff_flag = %d\n",__func__,tp_black_power_on_ff_flag);
+		return rc;
 	}
+
+	tp_black_power_on_ff_flag = 1;
+	pr_err("%s:[TP]tp_black_power_on_ff_flag = %d\n",__func__,tp_black_power_on_ff_flag);
 #endif /*OPLUS_BUG_STABILITY*/
 
 	if (gpio_is_valid(panel->reset_config.disp_en_gpio))
@@ -847,13 +832,11 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 	if (!strcmp(panel->name,"samsung SOFE03F dsc cmd mode panel")) {
 		usleep_range(10000, 11000);
 	}
-	/* Y700 DT2W: keep panel_vout up while the touch gesture is on. */
-	if (!tp_gesture_on && gpio_is_valid(panel->reset_config.panel_vout_gpio))
+	if (gpio_is_valid(panel->reset_config.panel_vout_gpio))
 		gpio_set_value(panel->reset_config.panel_vout_gpio, 0);
 #endif
 
-	/* Y700 DT2W: keep vddr up while the touch gesture is on. */
-	if (!tp_gesture_on && gpio_is_valid(panel->vddr_gpio)) {
+	if (gpio_is_valid(panel->vddr_gpio)) {
 		gpio_set_value(panel->vddr_gpio, 0);
 		DSI_ERR("disable vddr gpio\n");
 		msleep(1);
@@ -896,18 +879,10 @@ static int dsi_panel_power_off(struct dsi_panel *panel)
 	}
 #endif
 
-	/* Y700 DT2W: keep panel vregs up while the touch gesture is on.
-	 * NOTE: skipping the disable leaves power_info.refcount one higher
-	 * than a full power-off cycle would; power_on() bumps it once more
-	 * on wake, so the vregs stay on until a gesture-off cycle drains
-	 * the count back to 0. Standby drain is slightly higher after a
-	 * gesture-on cycle; accepted for the DT2W test build. */
-	if (!tp_gesture_on) {
-		rc = dsi_pwr_enable_regulator(&panel->power_info, false);
-		if (rc)
-			DSI_ERR("[%s] failed to enable vregs, rc=%d\n",
-					panel->name, rc);
-	}
+	rc = dsi_pwr_enable_regulator(&panel->power_info, false);
+	if (rc)
+		DSI_ERR("[%s] failed to enable vregs, rc=%d\n",
+				panel->name, rc);
 #ifdef OPLUS_BUG_STABILITY
 	/* Add for ensure complete power down done of hardware */
 	usleep_range(70 * 1000, (70 * 1000) + 100);

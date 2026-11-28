@@ -135,8 +135,6 @@ struct nvt_config_info {
 	const char *nvt_limit_name;
 };
 
-struct drm_panel;
-
 struct nvt_ts_data {
 	struct spi_device *client;
 	struct input_dev *input_dev;
@@ -168,9 +166,6 @@ struct nvt_ts_data {
 #endif
 	/* Y700 v3: MSM DRM screen-blank notifier (see probe registration) */
 	struct notifier_block msm_drm_notif;
-	/* Y700 DT2W-stock: DRM panel notifier (stock ZUI15 approach). */
-	struct notifier_block drm_panel_notif;
-	struct drm_panel *drm_panel;
 	uint32_t config_array_size;
 	struct nvt_config_info *config_array;
 	const u8 *fw_name;

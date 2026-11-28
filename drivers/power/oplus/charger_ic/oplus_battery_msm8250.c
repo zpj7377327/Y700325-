@@ -16711,6 +16711,36 @@ void oplus_set_flash_screen_ctrl_by_pcb_version(struct oplus_chg_chip *chip)
 }
 #endif
 extern int oplus_pdo_select(int vbus_mv, int ibus_ma);
+
+/* Y700 standard-PD fast charge: enable the SMB1398 div2 charge pump.
+ * Stock v1 oplus only ever reads the charge_pump_master psy, it never
+ * sets POWER_SUPPLY_PROP_CP_ENABLE, so the pump stays off even after
+ * the PD bus is raised to 9V/12V. Setting 1 clears the USER_VOTER
+ * disable vote in smb1398-charger.c and starts master + slave.
+ */
+static void oplus_y700_pd_enable_cp(bool enable)
+{
+	struct power_supply *cp_psy;
+	union power_supply_propval val = {0, };
+	int rc;
+
+	cp_psy = power_supply_get_by_name("charge_pump_master");
+	if (!cp_psy) {
+		printk(KERN_ERR "%s: charge_pump_master psy not found\n",
+			__func__);
+		return;
+	}
+	val.intval = enable ? 1 : 0;
+	rc = power_supply_set_property(cp_psy,
+			POWER_SUPPLY_PROP_CP_ENABLE, &val);
+	if (rc)
+		printk(KERN_ERR "%s: set CP_ENABLE=%d rc=%d\n",
+			__func__, val.intval, rc);
+	else
+		printk(KERN_ERR "%s: CP_ENABLE=%d ok\n", __func__, val.intval);
+	power_supply_put(cp_psy);
+}
+
 int oplus_chg_set_pd_config(void)
 {
 	int ret = 0;
@@ -16741,25 +16771,44 @@ int oplus_chg_set_pd_config(void)
 		msleep(300);
 		printk(KERN_ERR "%s: charger voltage=%d", __func__, usbtemp_get_charger_voltage_now());
 		oplus_chg_unsuspend_charger();
-	} else if (chip->batt_volt < chip->limits.vbatt_pdqc_to_9v_thr){
+	} else if (chip->batt_volt < chip->limits.vbatt_pdqc_to_9v_thr
+			|| (oplus_chg_get_charger_subtype() == CHARGER_SUBTYPE_PD
+				&& chip->charger_volt < 7500)) {
+		/* Y700 standard PD: stock oplus only ever asks 9V, and only
+		 * when batt_volt < vbatt_pdqc_to_9v_thr (4000, 1S scale);
+		 * the 2S Y700 pack never meets it, so a PD charger stays
+		 * at 5V forever. Ask 12V first, fall back to 9V, then
+		 * enable the SMB1398 div2 charge pump (stock v1 oplus
+		 * never sets CP_ENABLE). The charger_volt < 7500 gate
+		 * keeps a later call from downgrading an already-raised bus.
+		 */
+		int pd_mv = 12000;
+
 		if(oplus_chg_get_voocphy_support() == AP_SINGLE_CP_VOOCPHY)
 			oplus_voocphy_set_pdqc_config();
 		oplus_chg_suspend_charger();
 		oplus_chg_config_charger_vsys_threshold(0x02);//set Vsys Skip threshold 104%
 		oplus_chg_enable_burst_mode(false);
-		ret = oplus_pdo_select(9000, 2000);
+		ret = oplus_pdo_select(pd_mv, 2000);
+		if (ret) {
+			printk(KERN_ERR "%s: no %d mV PDO, fall back to 9V, ret=%d\n", __func__, pd_mv, ret);
+			pd_mv = 9000;
+			ret = oplus_pdo_select(pd_mv, 2000);
+		}
 		charger_volt = usbtemp_get_charger_voltage_now();
-		printk(KERN_ERR "%s: vbus[%d], ibus[%d], ret[%d], charger_volt=%d\n", __func__, 9000, 2000, ret, charger_volt);
-		while ((charger_volt < 7500) && (cnt_pd_retry < 5)) {
+		printk(KERN_ERR "%s: vbus[%d], ibus[%d], ret[%d], charger_volt=%d\n", __func__, pd_mv, 2000, ret, charger_volt);
+		while (ret == 0 && (charger_volt < 7500) && (cnt_pd_retry < 5)) {
 			msleep(150);
-			ret = oplus_pdo_select(9000, 2000);
+			ret = oplus_pdo_select(pd_mv, 2000);
 			msleep(50);
 			charger_volt = usbtemp_get_charger_voltage_now();
 			cnt_pd_retry++;
-			printk(KERN_ERR "%s: vbus[%d], ibus[%d], ret[%d], retry_cnt[%d], charger_volt=%d\n", __func__, 9000, 2000, ret, cnt_pd_retry, charger_volt);
+			printk(KERN_ERR "%s: vbus[%d], ibus[%d], ret[%d], retry_cnt[%d], charger_volt=%d\n", __func__, pd_mv, 2000, ret, cnt_pd_retry, charger_volt);
 		}
 		msleep(300);
 		oplus_chg_unsuspend_charger();
+		if (charger_volt > 7500)
+			oplus_y700_pd_enable_cp(true);
 	}
 	mutex_unlock(&pd_select_pdo_v);
 	return ret;

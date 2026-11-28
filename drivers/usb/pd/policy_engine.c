@@ -4473,11 +4473,10 @@ static ssize_t select_pdo_store(struct device *dev,
 	int src_cap_id;
 	int pdo, uv = 0, ua = 0;
 	int ret;
-
-#ifdef OPLUS_FEATURE_CHG_BASIC
-/* BSP.CHG.Basic, 2021/10/27, hvdcp_opti return */
-	return size;
-#endif
+	/* Y700: manual PDO select was stubbed out by oplus (hvdcp_opti);
+	 * allow it again so a standard PD PDO can be requested by hand.
+	 * Format: "<src_cap_id> <pdo> [<uV> <uA>]", e.g. "0 3" for PDO 3.
+	 */
 
 	mutex_lock(&pd->swap_lock);
 
